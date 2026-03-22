@@ -5,6 +5,7 @@
     <TargetFramework>net9.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
     <!-- ApplicationIcon>icon.ico</ApplicationIcon -->
     <AssemblyName>real-translate</AssemblyName>
     <Version>1.0.0</Version>

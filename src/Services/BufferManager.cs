@@ -22,7 +22,7 @@ public class BufferManager : IDisposable
     private string _lastInjectedText = string.Empty;
 
     // Debounce timer
-    private Timer? _debounceTimer;
+    private System.Threading.Timer? _debounceTimer;
     private bool _disposed;
 
     // Punctuation characters that trigger translation with context refinement
@@ -270,7 +270,7 @@ public class BufferManager : IDisposable
         var debounceMs = _state.Config?.Behavior?.DebounceMs ?? 500;
 
         _pendingTranslation = new CancellationTokenSource();
-        _debounceTimer = new Timer(
+        _debounceTimer = new System.Threading.Timer(
             OnDebounceElapsed,
             _pendingTranslation.Token,
             debounceMs,

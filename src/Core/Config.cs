@@ -23,8 +23,23 @@ public class AppConfig
             return defaultConfig;
         }
 
-        var content = File.ReadAllText(ConfigPath);
-        return Toml.ToModel<AppConfig>(content);
+        try
+        {
+            var content = File.ReadAllText(ConfigPath);
+            return Toml.ToModel<AppConfig>(content);
+        }
+        catch (TomlException)
+        {
+            // Malformed TOML - return default config
+            var defaultConfig = new AppConfig();
+            defaultConfig.Save();
+            return defaultConfig;
+        }
+        catch (IOException)
+        {
+            // File read error - return default config
+            return new AppConfig();
+        }
     }
 
     public void Save()

@@ -1,5 +1,6 @@
 // src/UI/TrayIcon.cs
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using RealTranslate.Core;
 
@@ -18,7 +19,16 @@ public class TrayIcon : IDisposable
     private Icon? _pausedIcon;
     private Icon? _errorIcon;
 
+    // Store HICON handles for proper cleanup
+    private IntPtr _activeIconHandle;
+    private IntPtr _pausedIconHandle;
+    private IntPtr _errorIconHandle;
+
     private bool _disposed;
+
+    // P/Invoke to destroy HICON handles
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 
     public event EventHandler? ExitRequested;
     public event EventHandler? ToggleRequested;
@@ -70,12 +80,12 @@ public class TrayIcon : IDisposable
     private void CreateIcons()
     {
         // Create simple colored icons (16x16)
-        _activeIcon = CreateSolidIcon(Color.FromArgb(0, 180, 0));    // Green
-        _pausedIcon = CreateSolidIcon(Color.FromArgb(160, 160, 160)); // Gray
-        _errorIcon = CreateSolidIcon(Color.FromArgb(220, 0, 0));     // Red
+        (_activeIcon, _activeIconHandle) = CreateSolidIcon(Color.FromArgb(0, 180, 0));    // Green
+        (_pausedIcon, _pausedIconHandle) = CreateSolidIcon(Color.FromArgb(160, 160, 160)); // Gray
+        (_errorIcon, _errorIconHandle) = CreateSolidIcon(Color.FromArgb(220, 0, 0));     // Red
     }
 
-    private static Icon CreateSolidIcon(Color color)
+    private static (Icon icon, IntPtr handle) CreateSolidIcon(Color color)
     {
         using var bitmap = new Bitmap(16, 16);
         using var graphics = Graphics.FromImage(bitmap);
@@ -88,9 +98,9 @@ public class TrayIcon : IDisposable
         using var pen = new Pen(Color.FromArgb(100, Color.Black), 1);
         graphics.DrawRectangle(pen, 0, 0, 15, 15);
 
-        // Convert to icon
+        // Convert to icon - store handle for cleanup
         var hIcon = bitmap.GetHicon();
-        return Icon.FromHandle(hIcon);
+        return (Icon.FromHandle(hIcon), hIcon);
     }
 
     public void UpdateIcon()
@@ -151,11 +161,10 @@ public class TrayIcon : IDisposable
                 _state.Config.Save();
             }
 
-            // Open with notepad
+            // Open with system default editor
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "notepad.exe",
-                Arguments = $"\"{configPath}\"",
+                FileName = configPath,
                 UseShellExecute = true
             });
         }
@@ -195,9 +204,17 @@ public class TrayIcon : IDisposable
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
 
+        // Dispose icons and destroy HICON handles
         _activeIcon?.Dispose();
         _pausedIcon?.Dispose();
         _errorIcon?.Dispose();
+
+        if (_activeIconHandle != IntPtr.Zero)
+            DestroyIcon(_activeIconHandle);
+        if (_pausedIconHandle != IntPtr.Zero)
+            DestroyIcon(_pausedIconHandle);
+        if (_errorIconHandle != IntPtr.Zero)
+            DestroyIcon(_errorIconHandle);
 
         GC.SuppressFinalize(this);
     }

@@ -282,6 +282,8 @@ public class BufferManager : IDisposable
         if (state is not CancellationToken cancellationToken || cancellationToken.IsCancellationRequested)
             return;
 
+        TranslationTask? taskToWrite = null;
+
         lock (_lock)
         {
             if (_disposed || cancellationToken.IsCancellationRequested)
@@ -293,20 +295,20 @@ public class BufferManager : IDisposable
                 return;
 
             // Emit phrase with context for refinement
-            var task = CreateTranslationTask(
+            taskToWrite = CreateTranslationTask(
                 phrase,
                 TranslationMode.PhraseWithContext,
                 _charactersSinceLastInject);
+        }
 
-            if (task is not null)
-            {
-                // Write to translation channel
-                _ = AppChannels.TranslationTasks.Writer.WriteAsync(task, cancellationToken);
-            }
+        // Write to channel outside the lock to avoid potential deadlock
+        if (taskToWrite is not null)
+        {
+            _ = AppChannels.TranslationTasks.Writer.WriteAsync(taskToWrite, cancellationToken);
         }
     }
 
-    private TranslationTask? CreateTranslationTask(
+    private static TranslationTask? CreateTranslationTask(
         string text,
         TranslationMode mode,
         int charactersToDelete)
@@ -314,12 +316,12 @@ public class BufferManager : IDisposable
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
-        var cts = new CancellationTokenSource();
+        // Use CancellationToken.None - cancellation is managed by the debounce timer
         return new TranslationTask(
             text,
             mode,
             charactersToDelete,
-            cts.Token);
+            CancellationToken.None);
     }
 
     private void CancelPendingTranslation()

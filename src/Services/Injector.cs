@@ -63,7 +63,14 @@ public class Injector
         {
             // Loop protection: wait before clearing IsInjecting
             var loopProtectionMs = _state.Config?.Behavior?.LoopProtectionMs ?? 50;
-            await Task.Delay(loopProtectionMs, ct);
+            try
+            {
+                await Task.Delay(loopProtectionMs, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Still reset IsInjecting even if cancelled
+            }
 
             _state.IsInjecting = false;
         }
@@ -125,7 +132,14 @@ public class Injector
         {
             // Loop protection: wait before clearing IsInjecting
             var loopProtectionMs = _state.Config?.Behavior?.LoopProtectionMs ?? 50;
-            await Task.Delay(loopProtectionMs, ct);
+            try
+            {
+                await Task.Delay(loopProtectionMs, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Still reset IsInjecting even if cancelled
+            }
 
             _state.IsInjecting = false;
         }

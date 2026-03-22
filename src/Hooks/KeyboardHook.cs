@@ -13,6 +13,7 @@ public class KeyboardHook : IDisposable
 {
     private readonly AppState _appState;
     private readonly System.Threading.Channels.ChannelWriter<KbEvent> _eventWriter;
+    private readonly object _lock = new();
 
     private IntPtr _hookHandle = IntPtr.Zero;
     private Win32.LowLevelKeyboardProc? _hookProc; // Keep delegate alive
@@ -103,19 +104,22 @@ public class KeyboardHook : IDisposable
     /// </summary>
     public void Start()
     {
-        if (_isRunning)
-            return;
-
-        _isRunning = true;
-
-        _hookThread = new Thread(HookThreadProc)
+        lock (_lock)
         {
-            Name = "KeyboardHookThread",
-            IsBackground = true
-        };
+            if (_isRunning)
+                return;
 
-        _hookThread.SetApartmentState(ApartmentState.STA);
-        _hookThread.Start();
+            _isRunning = true;
+
+            _hookThread = new Thread(HookThreadProc)
+            {
+                Name = "KeyboardHookThread",
+                IsBackground = true
+            };
+
+            _hookThread.SetApartmentState(ApartmentState.STA);
+            _hookThread.Start();
+        }
     }
 
     /// <summary>
@@ -123,19 +127,22 @@ public class KeyboardHook : IDisposable
     /// </summary>
     public void Stop()
     {
-        if (!_isRunning)
-            return;
-
-        _isRunning = false;
-
-        // Post WM_QUIT to the hook thread to exit the message loop
-        if (_hookThread != null && _hookThread.IsAlive)
+        lock (_lock)
         {
-            PostThreadMessage(_hookThread.ManagedThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
-            _hookThread.Join(TimeSpan.FromSeconds(2));
-        }
+            if (!_isRunning)
+                return;
 
-        Unhook();
+            _isRunning = false;
+
+            // Post WM_QUIT to the hook thread to exit the message loop
+            if (_hookThread != null && _hookThread.IsAlive)
+            {
+                PostThreadMessage(_hookThread.ManagedThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+                _hookThread.Join(TimeSpan.FromSeconds(2));
+            }
+
+            Unhook();
+        }
     }
 
     private void HookThreadProc()

@@ -57,21 +57,22 @@ public static class Win32
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
-    [StructLayout(LayoutKind.Sequential)]
+    /// <summary>
+    /// INPUT structure for SendInput. Uses explicit layout for x64 compatibility.
+    /// On x64: Type (4 bytes) + padding (4 bytes) + union (24 bytes) = 32 bytes total.
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit, Size = 32)]
     public struct INPUT
     {
-        public uint Type;
-        public InputUnion U;
+        [FieldOffset(0)] public uint Type;
+        [FieldOffset(8)] public KEYBDINPUT Ki;
     }
 
-    [StructLayout(LayoutKind.Explicit)]
-    public struct InputUnion
-    {
-        [FieldOffset(0)] public KEYBOARD_INPUT_DATA Keyboard;
-    }
-
+    /// <summary>
+    /// KEYBDINPUT structure for keyboard input simulation.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct KEYBOARD_INPUT_DATA
+    public struct KEYBDINPUT
     {
         public ushort wVk;
         public ushort wScan;

@@ -1,6 +1,6 @@
 # command-to-translate
 
-Windows tray app for translating text on demand from `pt-BR` to `en-US` using Ollama.
+Windows tray app for translating text on demand between supported languages using Ollama.
 
 ## What it does
 
@@ -72,6 +72,10 @@ Temperature = 0.0
 Stream = false
 KeepAlive = "5m"
 
+[Translation]
+SourceLanguage = "pt-BR"
+TargetLanguage = "en-US"
+
 [Behavior]
 ShortcutStepDelayMs = 35
 ClipboardTimeoutMs = 800
@@ -90,20 +94,39 @@ Main settings:
 
 - `Ollama.Endpoint`: Ollama base URL
 - `Ollama.Model`: translation model name
+- `Translation.SourceLanguage`: currently selected source language
+- `Translation.TargetLanguage`: currently selected target language
 - `Hotkey.Modifiers` / `Hotkey.Key`: global hotkey
 - `Ui.ShowNotifications`: enables tray notifications
 - `Ui.NotifyOnError`: enables error notifications
 
+Supported languages in this version:
+
+- `pt-BR` Portuguese (Brazil)
+- `en-US` English (US)
+- `es-ES` Spanish
+- `fr-FR` French
+- `de-DE` German
+- `ja-JP` Japanese
+- `zh-Hans` Mandarin (Simplified)
+- `it-IT` Italian
+
+The selected source/target pair is also used to build the prompt sent to Ollama, so changing the selection changes the translation direction immediately.
+
 ## Usage
 
 1. Start the app.
-2. Type or select Portuguese text in a supported host.
-3. Press `Ctrl + Shift + T` or your configured hotkey.
-4. Wait for the text to be replaced with the translation.
+2. Open `Select translation languages...` in the tray menu if needed.
+3. Open `Change hotkey...` in the tray menu if you want a different shortcut.
+4. Type or select text in a supported host.
+5. Press your configured hotkey.
+6. Wait for the text to be replaced with the translation.
 
 Tray menu:
 
 - `Enable hotkey translation`
+- `Select translation languages...`
+- `Change hotkey...`
 - `Open config file`
 - `About`
 - `Exit`
@@ -128,7 +151,8 @@ Logs are written to:
 
 ## Limitations
 
-- Translation direction is fixed to `pt-BR -> en-US`
+- Only supported languages in the built-in catalog can be selected
+- Source and target languages must be different
 - Windows only
 - In some hosts, capture is limited to text before the cursor
 - In Electron/TUI terminals, only text typed in the current session is available in the buffer

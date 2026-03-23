@@ -19,6 +19,8 @@ public class TrayIcon : IDisposable
 
     public event EventHandler? ExitRequested;
     public event EventHandler? ToggleRequested;
+    public event EventHandler<TranslationLanguagesSelectedEventArgs>? TranslationLanguagesSelected;
+    public event EventHandler<HotkeyBindingSelectedEventArgs>? HotkeyBindingSelected;
 
     public TrayIcon(AppState state)
     {
@@ -36,6 +38,9 @@ public class TrayIcon : IDisposable
             Checked = !_state.IsPaused
         };
         contextMenu.Items.Add(_enableTranslationItem);
+
+        contextMenu.Items.Add("Select translation languages...", null, OnSelectTranslationLanguages);
+        contextMenu.Items.Add("Change hotkey...", null, OnChangeHotkey);
 
         // Separator
         contextMenu.Items.Add(new ToolStripSeparator());
@@ -116,6 +121,34 @@ public class TrayIcon : IDisposable
         ToggleRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void OnSelectTranslationLanguages(object? sender, EventArgs e)
+    {
+        using var dialog = new LanguageSelectionForm(
+            _state.GetSupportedTranslationLanguages(),
+            _state.ActiveTranslationPair);
+
+        if (dialog.ShowDialog() != DialogResult.OK)
+        {
+            return;
+        }
+
+        TranslationLanguagesSelected?.Invoke(
+            this,
+            new TranslationLanguagesSelectedEventArgs(
+                dialog.SelectedSourceLanguageCode,
+                dialog.SelectedTargetLanguageCode));
+    }
+
+    private void OnChangeHotkey(object? sender, EventArgs e)
+    {
+        using var dialog = new HotkeySelectionForm(_state.ActiveHotkeyBinding);
+
+        if (dialog.ShowDialog() != DialogResult.OK)
+            return;
+
+        HotkeyBindingSelected?.Invoke(this, new HotkeyBindingSelectedEventArgs(dialog.SelectedBinding));
+    }
+
     private void OnOpenConfig(object? sender, EventArgs e)
     {
         try
@@ -149,9 +182,11 @@ public class TrayIcon : IDisposable
             "command-to-translate v1.0.0\n\n" +
             "An on-demand translation tool using Ollama.\n\n" +
             "Usage:\n" +
-            "1. Type or review your text\n" +
-            "2. Press Ctrl+Shift+T\n" +
-            "3. The current field or terminal line is replaced with the translation\n\n" +
+            "1. Choose translation languages in the tray menu\n" +
+            "2. Change the hotkey in the tray menu if needed\n" +
+            "3. Type or review your text\n" +
+            "4. Press your configured hotkey\n" +
+            "5. The current field or terminal line is replaced with the translation\n\n" +
             "Requires Ollama with a translation model.",
             "About command-to-translate",
             MessageBoxButtons.OK,
@@ -176,4 +211,28 @@ public class TrayIcon : IDisposable
 
         GC.SuppressFinalize(this);
     }
+}
+
+public sealed class TranslationLanguagesSelectedEventArgs : EventArgs
+{
+    public TranslationLanguagesSelectedEventArgs(
+        string sourceLanguageCode,
+        string targetLanguageCode)
+    {
+        SourceLanguageCode = sourceLanguageCode;
+        TargetLanguageCode = targetLanguageCode;
+    }
+
+    public string SourceLanguageCode { get; }
+    public string TargetLanguageCode { get; }
+}
+
+public sealed class HotkeyBindingSelectedEventArgs : EventArgs
+{
+    public HotkeyBindingSelectedEventArgs(HotkeyBinding binding)
+    {
+        Binding = binding ?? throw new ArgumentNullException(nameof(binding));
+    }
+
+    public HotkeyBinding Binding { get; }
 }

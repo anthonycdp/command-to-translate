@@ -9,7 +9,7 @@ namespace CommandToTranslate.Services;
 
 /// <summary>
 /// Service for communicating with Ollama API for translation.
-/// Handles Portuguese (pt-BR) to English (en-US) translation.
+/// Builds requests dynamically from the active translation pair.
 /// </summary>
 public class TranslationService : IDisposable, ITextTranslator
 {
@@ -25,20 +25,6 @@ public class TranslationService : IDisposable, ITextTranslator
     // Rate limiting for error notifications
     private DateTime _lastNotificationTime = DateTime.MinValue;
     private readonly TimeSpan _notificationCooldown = TimeSpan.FromSeconds(30);
-
-    // System prompt for translation
-    private const string SystemPrompt = @"You are a deterministic translator from Brazilian Portuguese (pt-BR) to American English (en-US).
-
-Rules:
-- Translate ONLY the given text exactly once.
-- Never ask for clarification.
-- Never explain ambiguity.
-- If the input is a single word, translate it to the most common neutral English equivalent.
-- Preserve the tone and register of the original text when possible.
-- Keep punctuation appropriate for the target language.
-- If the text is already in English, return it unchanged.
-- Prefer natural American English.
-- Return ONLY the translation, nothing else.";
 
     public TranslationService(AppState state)
     {
@@ -67,7 +53,7 @@ Rules:
     }
 
     /// <summary>
-    /// Translates text from pt-BR to en-US using Ollama.
+    /// Translates text using the currently selected translation pair.
     /// </summary>
     /// <param name="text">The text to translate.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -84,18 +70,13 @@ Rules:
         var temperature = _state.Config.Ollama.Temperature;
         var stream = _state.Config.Ollama.Stream;
 
-        var requestBody = new OllamaChatRequest
-        {
-            Model = model,
-            Stream = stream,
-            KeepAlive = _keepAlive,
-            Options = new OllamaOptions { Temperature = temperature },
-            Messages = new List<OllamaMessage>
-            {
-                new() { Role = "system", Content = SystemPrompt },
-                new() { Role = "user", Content = text }
-            }
-        };
+        var requestBody = CreateChatRequest(
+            model,
+            stream,
+            _keepAlive,
+            temperature,
+            _state.ActiveTranslationPair,
+            text);
 
         try
         {
@@ -162,18 +143,13 @@ Rules:
         {
             var model = _state.Config.Ollama.Model;
 
-            var requestBody = new OllamaChatRequest
-            {
-                Model = model,
-                Stream = false,
-                KeepAlive = _keepAlive,
-                Options = new OllamaOptions { Temperature = _state.Config.Ollama.Temperature },
-                Messages = new List<OllamaMessage>
-                {
-                    new() { Role = "system", Content = SystemPrompt },
-                    new() { Role = "user", Content = text }
-                }
-            };
+            var requestBody = CreateChatRequest(
+                model,
+                stream: false,
+                _keepAlive,
+                _state.Config.Ollama.Temperature,
+                _state.ActiveTranslationPair,
+                text);
 
             var response = await _httpClient.PostAsJsonAsync(
                 $"{_endpoint}/api/chat",
@@ -317,6 +293,46 @@ Rules:
         };
 
         return builder.Uri.ToString().TrimEnd('/');
+    }
+
+    internal static OllamaChatRequest CreateChatRequest(
+        string model,
+        bool stream,
+        string? keepAlive,
+        double temperature,
+        TranslationPair translationPair,
+        string text)
+    {
+        return new OllamaChatRequest
+        {
+            Model = model,
+            Stream = stream,
+            KeepAlive = keepAlive,
+            Options = new OllamaOptions { Temperature = temperature },
+            Messages = new List<OllamaMessage>
+            {
+                new() { Role = "system", Content = BuildSystemPrompt(translationPair) },
+                new() { Role = "user", Content = text }
+            }
+        };
+    }
+
+    internal static string BuildSystemPrompt(TranslationPair translationPair)
+    {
+        ArgumentNullException.ThrowIfNull(translationPair);
+
+        return $@"You are a deterministic translator from {translationPair.SourceLanguage.Code} to {translationPair.TargetLanguage.Code}.
+
+Rules:
+- Translate ONLY the given text exactly once.
+- Never ask for clarification.
+- Never explain ambiguity.
+- If the input is a single word, translate it to the most common neutral equivalent in the target language.
+- Preserve the tone and register of the original text when possible.
+- Keep punctuation appropriate for the target language.
+- If the text is already in {translationPair.TargetLanguage.Code}, return it unchanged.
+- Prefer natural, idiomatic usage in the target language.
+- Return ONLY the translation, nothing else.";
     }
 
     public void Dispose()

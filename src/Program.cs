@@ -16,6 +16,7 @@ static class Program
     private static TranslationService? _translationService;
     private static OnDemandTranslationCoordinator? _translationCoordinator;
     private static HotkeyManager? _hotkeyManager;
+    private static HotkeyRebindingService? _hotkeyRebindingService;
     private static TrayIcon? _trayIcon;
     private static KeyboardHook? _keyboardHook;
     private static BufferManager? _bufferManager;
@@ -97,6 +98,7 @@ static class Program
             // Create a hidden form for receiving hotkey messages
             using var messageWindow = new MessageWindow();
             _hotkeyManager = new HotkeyManager(_state, messageWindow.Handle);
+            _hotkeyRebindingService = new HotkeyRebindingService(_state, _hotkeyManager);
             Logger.Info("HotkeyManager created");
 
             // Step 6: Register hotkey
@@ -137,6 +139,51 @@ static class Program
                 _trayIcon.ShowNotification(
                     "command-to-translate",
                     $"Hotkey translation {status}",
+                    ToolTipIcon.Info);
+            };
+
+            _trayIcon.TranslationLanguagesSelected += (s, e) =>
+            {
+                if (!_state!.TrySetActiveTranslationPair(
+                    e.SourceLanguageCode,
+                    e.TargetLanguageCode,
+                    out var activePair))
+                {
+                    Logger.Warning(
+                        $"Ignored unsupported translation pair selection: {e.SourceLanguageCode}:{e.TargetLanguageCode}");
+                    return;
+                }
+
+                _state.Config.Save();
+                _trayIcon!.UpdateIcon();
+
+                Logger.Info($"Translation pair changed to {activePair.Id}");
+                _trayIcon.ShowNotification(
+                    "command-to-translate",
+                    $"Translation language set to {activePair.Label}",
+                    ToolTipIcon.Info);
+            };
+
+            _trayIcon.HotkeyBindingSelected += (s, e) =>
+            {
+                var result = _hotkeyRebindingService!.Apply(e.Binding);
+                _trayIcon!.UpdateIcon();
+
+                if (!result.Success)
+                {
+                    Logger.Warning(result.Message);
+                    _trayIcon.ShowNotification(
+                        "command-to-translate",
+                        result.Message,
+                        ToolTipIcon.Warning);
+                    return;
+                }
+
+                _state!.Config.Save();
+                Logger.Info(result.Message);
+                _trayIcon.ShowNotification(
+                    "command-to-translate",
+                    $"Hotkey set to {result.ActiveBinding.Label}",
                     ToolTipIcon.Info);
             };
 

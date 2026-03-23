@@ -2,6 +2,7 @@
 using System.Runtime.InteropServices;
 using CommandToTranslate.Core;
 using CommandToTranslate.Native;
+using CommandToTranslate.Services;
 
 namespace CommandToTranslate.Hooks;
 
@@ -9,7 +10,7 @@ namespace CommandToTranslate.Hooks;
 /// Manages global hotkey registration for on-demand translation.
 /// Uses the RegisterHotKey Win32 API for system-wide hotkey detection.
 /// </summary>
-public class HotkeyManager : IDisposable
+public class HotkeyManager : IDisposable, IHotkeyRegistrar
 {
     private readonly AppState _appState;
     private readonly IntPtr _windowHandle;
@@ -44,13 +45,18 @@ public class HotkeyManager : IDisposable
         if (_isRegistered)
             return true;
 
-        var hotkeyConfig = _appState.Config?.Hotkey;
-        if (hotkeyConfig == null)
-            return false;
+        return Register(_appState.ActiveHotkeyBinding);
+    }
 
-        uint modifiers = ParseModifiers(hotkeyConfig.Modifiers);
-        uint key = ParseKey(hotkeyConfig.Key);
+    public bool Register(HotkeyBinding binding)
+    {
+        if (_isRegistered)
+            return true;
 
+        ArgumentNullException.ThrowIfNull(binding);
+
+        uint modifiers = ParseModifiers(binding.Modifiers.ToList());
+        uint key = ParseKey(binding.Key);
         if (key == 0)
             return false;
 
@@ -99,24 +105,7 @@ public class HotkeyManager : IDisposable
     /// <returns>Combined modifier flags.</returns>
     public static uint ParseModifiers(List<string>? modifiers)
     {
-        uint result = 0;
-
-        if (modifiers == null)
-            return result;
-
-        foreach (string modifier in modifiers)
-        {
-            result |= modifier.ToUpperInvariant() switch
-            {
-                "CTRL" or "CONTROL" => Win32.MOD_CONTROL,
-                "SHIFT" => Win32.MOD_SHIFT,
-                "ALT" => Win32.MOD_ALT,
-                "WIN" or "WINDOWS" => Win32.MOD_WIN,
-                _ => 0
-            };
-        }
-
-        return result;
+        return HotkeyBindingParser.ParseModifiersToFlags(modifiers);
     }
 
     /// <summary>
@@ -126,86 +115,7 @@ public class HotkeyManager : IDisposable
     /// <returns>Virtual key code, or 0 if invalid.</returns>
     public static uint ParseKey(string? key)
     {
-        if (string.IsNullOrWhiteSpace(key))
-            return 0;
-
-        string normalizedKey = key.ToUpperInvariant().Trim();
-
-        // Single character keys (A-Z, 0-9)
-        if (normalizedKey.Length == 1)
-        {
-            char c = normalizedKey[0];
-            if (c >= 'A' && c <= 'Z')
-                return c; // VK codes for A-Z are the same as ASCII
-            if (c >= '0' && c <= '9')
-                return c; // VK codes for 0-9 are the same as ASCII
-        }
-
-        // Named keys
-        return normalizedKey switch
-        {
-            "SPACE" => 0x20,        // VK_SPACE
-            "ENTER" or "RETURN" => 0x0D, // VK_RETURN
-            "TAB" => 0x09,          // VK_TAB
-            "ESCAPE" or "ESC" => 0x1B, // VK_ESCAPE
-            "BACKSPACE" or "BACK" => 0x08, // VK_BACK
-            "INSERT" => 0x2D,       // VK_INSERT
-            "DELETE" => 0x2E,       // VK_DELETE
-            "HOME" => 0x24,         // VK_HOME
-            "END" => 0x23,          // VK_END
-            "PAGEUP" => 0x21,       // VK_PRIOR
-            "PAGEDOWN" => 0x22,     // VK_NEXT
-            "UP" => 0x26,           // VK_UP
-            "DOWN" => 0x28,         // VK_DOWN
-            "LEFT" => 0x25,         // VK_LEFT
-            "RIGHT" => 0x27,        // VK_RIGHT
-
-            // Function keys F1-F24
-            "F1" => 0x70,
-            "F2" => 0x71,
-            "F3" => 0x72,
-            "F4" => 0x73,
-            "F5" => 0x74,
-            "F6" => 0x75,
-            "F7" => 0x76,
-            "F8" => 0x77,
-            "F9" => 0x78,
-            "F10" => 0x79,
-            "F11" => 0x7A,
-            "F12" => 0x7B,
-            "F13" => 0x7C,
-            "F14" => 0x7D,
-            "F15" => 0x7E,
-            "F16" => 0x7F,
-            "F17" => 0x80,
-            "F18" => 0x81,
-            "F19" => 0x82,
-            "F20" => 0x83,
-            "F21" => 0x84,
-            "F22" => 0x85,
-            "F23" => 0x86,
-            "F24" => 0x87,
-
-            // Numpad keys
-            "NUMPAD0" => 0x60,
-            "NUMPAD1" => 0x61,
-            "NUMPAD2" => 0x62,
-            "NUMPAD3" => 0x63,
-            "NUMPAD4" => 0x64,
-            "NUMPAD5" => 0x65,
-            "NUMPAD6" => 0x66,
-            "NUMPAD7" => 0x67,
-            "NUMPAD8" => 0x68,
-            "NUMPAD9" => 0x69,
-            "MULTIPLY" => 0x6A,
-            "ADD" => 0x6B,
-            "SEPARATOR" => 0x6C,
-            "SUBTRACT" => 0x6D,
-            "DECIMAL" => 0x6E,
-            "DIVIDE" => 0x6F,
-
-            _ => 0
-        };
+        return HotkeyBindingParser.ParseKeyCode(key);
     }
 
     /// <summary>

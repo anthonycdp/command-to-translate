@@ -78,6 +78,9 @@ public static class Win32
     public const uint MOD_SHIFT = 0x0004;
     public const uint MOD_WIN = 0x0008;
 
+    public const int VK_LWIN = 0x5B;
+    public const int VK_RWIN = 0x5C;
+
     public const int WM_HOTKEY = 0x0312;
 
     #endregion

@@ -105,6 +105,9 @@ public class TrayIcon : IDisposable
         if (_disposed)
             return;
 
+        if (!_state.Config.Ui.ShowNotifications)
+            return;
+
         _notifyIcon.ShowBalloonTip(3000, title, message, icon);
     }
 

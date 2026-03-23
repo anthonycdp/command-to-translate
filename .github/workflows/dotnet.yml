@@ -1,0 +1,30 @@
+name: .NET
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore command-to-translate.slnx
+
+      - name: Build
+        run: dotnet build command-to-translate.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test command-to-translate.slnx --configuration Release --no-build --verbosity normal

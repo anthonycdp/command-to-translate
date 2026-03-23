@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/CommandToTranslate.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CommandToTranslate.Tests/CommandToTranslate.Tests.csproj" />
+  </Folder>
 </Solution>

@@ -37,7 +37,6 @@ public sealed class BufferManager : IDisposable
     private readonly StringBuilder _currentPhrase = new();
     private readonly StringBuilder _currentWord = new();
 
-    private IntPtr _lastWindowHandle = IntPtr.Zero;
     private bool _disposed;
 
     public string CurrentPhrase
@@ -82,12 +81,6 @@ public sealed class BufferManager : IDisposable
         {
             if (_disposed)
                 return;
-
-            if (keyboardEvent.WindowHandle != _lastWindowHandle)
-            {
-                ResetState();
-                _lastWindowHandle = keyboardEvent.WindowHandle;
-            }
 
             switch (keyboardEvent.Type)
             {

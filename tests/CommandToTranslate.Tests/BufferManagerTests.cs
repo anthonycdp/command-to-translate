@@ -61,18 +61,6 @@ public class BufferManagerTests
     }
 
     [Fact]
-    public void ProcessEvent_ResetsBufferWhenWindowChanges()
-    {
-        using var buffer = new BufferManager();
-
-        Type(buffer, "primeira", (IntPtr)1);
-        Type(buffer, "segunda", (IntPtr)2);
-
-        Assert.Equal("segunda", buffer.CurrentPhrase);
-        Assert.Equal("segunda", buffer.CurrentWord);
-    }
-
-    [Fact]
     public void ProcessEvent_IgnoresPasswordFields()
     {
         using var buffer = new BufferManager();
@@ -101,12 +89,11 @@ public class BufferManagerTests
 
     private static void Type(BufferManager buffer, string text, IntPtr? windowHandle = null)
     {
-        var handle = windowHandle ?? IntPtr.Zero;
         foreach (var character in text)
         {
             var eventType = character == ' ' ? KbEventType.Space : KbEventType.Char;
             char? value = eventType == KbEventType.Char ? character : null;
-            buffer.ProcessEvent(new KbEvent(value, eventType, handle, false));
+            buffer.ProcessEvent(new KbEvent(value, eventType, windowHandle ?? IntPtr.Zero, false));
         }
     }
 }

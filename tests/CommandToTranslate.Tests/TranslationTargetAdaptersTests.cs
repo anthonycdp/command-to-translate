@@ -8,7 +8,7 @@ namespace CommandToTranslate.Tests;
 public class TranslationTargetAdaptersTests
 {
     [Fact]
-    public async Task GenericTextField_SelectSource_UsesCtrlShiftHome()
+    public async Task GenericTextField_SelectSource_UsesCtrlA()
     {
         var adapter = new GenericTextFieldAdapter();
         var inputDispatcher = new RecordingInputDispatcher();
@@ -17,11 +17,11 @@ public class TranslationTargetAdaptersTests
 
         Assert.Collection(
             inputDispatcher.Chords,
-            chord => Assert.Equal(new ushort[] { 0x11, 0x10, 0x24 }, chord));
+            chord => Assert.Equal(new ushort[] { 0x11, 0x41 }, chord));  // Ctrl+A
     }
 
     [Fact]
-    public async Task GenericTextField_ReplaceSelection_WithCursorFallback_ReselectsAndTypesTranslation()
+    public async Task GenericTextField_ReplaceSelection_WithCursorFallback_SelectsAllAndPastes()
     {
         var adapter = new GenericTextFieldAdapter();
         var inputDispatcher = new RecordingInputDispatcher();
@@ -34,10 +34,31 @@ public class TranslationTargetAdaptersTests
             CancellationToken.None);
 
         Assert.Empty(inputDispatcher.Keys);
-        Assert.Equal(["let's go"], inputDispatcher.TypedTexts);
+        Assert.Empty(inputDispatcher.TypedTexts);
         Assert.Collection(
             inputDispatcher.Chords,
-            chord => Assert.Equal(new ushort[] { 0x11, 0x10, 0x24 }, chord));
+            chord => Assert.Equal(new ushort[] { 0x11, 0x41 }, chord),   // Ctrl+A
+            chord => Assert.Equal(new ushort[] { 0x11, 0x56 }, chord));  // Ctrl+V
+    }
+
+    [Fact]
+    public async Task GenericTextField_ReplaceSelection_WithoutCursorFallback_PastesDirectly()
+    {
+        var adapter = new GenericTextFieldAdapter();
+        var inputDispatcher = new RecordingInputDispatcher();
+
+        await adapter.ReplaceSelectionAsync(
+            inputDispatcher,
+            sourceText: "vamos",
+            translatedText: "let's go",
+            usedCursorFallback: false,
+            CancellationToken.None);
+
+        Assert.Empty(inputDispatcher.Keys);
+        Assert.Empty(inputDispatcher.TypedTexts);
+        Assert.Collection(
+            inputDispatcher.Chords,
+            chord => Assert.Equal(new ushort[] { 0x11, 0x56 }, chord));  // Ctrl+V
     }
 
     [Fact]
@@ -62,7 +83,7 @@ public class TranslationTargetAdaptersTests
     }
 
     [Fact]
-    public async Task ElectronTerminal_ReplaceSelection_UsesBackspaceAndShiftInsert()
+    public async Task ElectronTerminal_ReplaceSelection_BackspacesThenCtrlShiftV()
     {
         var adapter = new ElectronTerminalAdapter();
         var inputDispatcher = new RecordingInputDispatcher();
@@ -79,7 +100,7 @@ public class TranslationTargetAdaptersTests
         Assert.Empty(inputDispatcher.TypedTexts);
         Assert.Collection(
             inputDispatcher.Chords,
-            chord => Assert.Equal(new ushort[] { 0x10, 0x2D }, chord));
+            chord => Assert.Equal(new ushort[] { 0x11, 0x10, 0x56 }, chord));  // Ctrl+Shift+V
     }
 
     private sealed class RecordingInputDispatcher : IInputDispatcher

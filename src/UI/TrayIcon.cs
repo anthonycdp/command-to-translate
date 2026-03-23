@@ -13,12 +13,15 @@ public class TrayIcon : IDisposable
     private readonly AppState _state;
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _enableTranslationItem;
+    private readonly ToolStripMenuItem _startWithWindowsItem;
     private readonly Icon _appIcon;
 
     private bool _disposed;
+    private bool _startWithWindowsEnabled;
 
     public event EventHandler? ExitRequested;
     public event EventHandler? ToggleRequested;
+    public event EventHandler? StartWithWindowsToggleRequested;
     public event EventHandler<TranslationLanguagesSelectedEventArgs>? TranslationLanguagesSelected;
     public event EventHandler<HotkeyBindingSelectedEventArgs>? HotkeyBindingSelected;
 
@@ -41,6 +44,8 @@ public class TrayIcon : IDisposable
 
         contextMenu.Items.Add("Select translation languages...", null, OnSelectTranslationLanguages);
         contextMenu.Items.Add("Change hotkey...", null, OnChangeHotkey);
+        _startWithWindowsItem = new ToolStripMenuItem("Start with Windows", null, OnToggleStartWithWindows);
+        contextMenu.Items.Add(_startWithWindowsItem);
 
         // Separator
         contextMenu.Items.Add(new ToolStripSeparator());
@@ -103,6 +108,7 @@ public class TrayIcon : IDisposable
 
         // Update menu item state
         _enableTranslationItem.Checked = !_state.IsPaused;
+        _startWithWindowsItem.Checked = _startWithWindowsEnabled;
     }
 
     public void ShowNotification(string title, string message, ToolTipIcon icon)
@@ -116,9 +122,24 @@ public class TrayIcon : IDisposable
         _notifyIcon.ShowBalloonTip(3000, title, message, icon);
     }
 
+    public void SetStartWithWindowsEnabled(bool enabled)
+    {
+        _startWithWindowsEnabled = enabled;
+
+        if (_disposed)
+            return;
+
+        _startWithWindowsItem.Checked = enabled;
+    }
+
     private void OnToggleTranslation(object? sender, EventArgs e)
     {
         ToggleRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnToggleStartWithWindows(object? sender, EventArgs e)
+    {
+        StartWithWindowsToggleRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnSelectTranslationLanguages(object? sender, EventArgs e)
@@ -153,9 +174,7 @@ public class TrayIcon : IDisposable
     {
         try
         {
-            var configPath = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "config.toml");
+            var configPath = AppConfig.GetConfigPath();
 
             // Ensure config file exists
             if (!File.Exists(configPath))

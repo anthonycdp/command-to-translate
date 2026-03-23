@@ -1,5 +1,6 @@
 // src/Services/Logger.cs
 using System.Text;
+using CommandToTranslate.Core;
 
 namespace CommandToTranslate.Services;
 
@@ -15,10 +16,8 @@ public static class Logger
 
     static Logger()
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var logDir = Path.Combine(appDataPath, "command-to-translate", "logs");
-        Directory.CreateDirectory(logDir);
-        LogPath = Path.Combine(logDir, $"command-to-translate-{DateTime.Now:yyyyMMdd}.log");
+        Directory.CreateDirectory(AppPaths.LogDirectory);
+        LogPath = Path.Combine(AppPaths.LogDirectory, $"command-to-translate-{DateTime.Now:yyyyMMdd}.log");
     }
 
     public static string LogFilePath => LogPath;

@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore command-to-translate.slnx
+
+      - name: Build
+        run: dotnet build command-to-translate.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test command-to-translate.slnx --configuration Release --no-build --verbosity normal
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: .\scripts\Build-Installer.ps1
+
+      - name: Upload publish output
+        uses: actions/upload-artifact@v4
+        with:
+          name: command-to-translate-publish-win-x64
+          path: artifacts/publish/win-x64
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: command-to-translate-installer
+          path: artifacts/installer/*.exe

@@ -45,21 +45,41 @@ Run the app:
 dotnet run --project src\CommandToTranslate.csproj
 ```
 
-Publish a release build:
+Publish a self-contained release build:
 
 ```powershell
-dotnet publish src\CommandToTranslate.csproj -c Release -r win-x64 --self-contained false
+dotnet publish src\CommandToTranslate.csproj -c Release -r win-x64 --self-contained true -o artifacts\publish\win-x64
 ```
 
 Published output:
 
 ```text
-src\bin\Release\net9.0-windows\win-x64\publish\
+artifacts\publish\win-x64\
+```
+
+Build the Windows installer locally:
+
+```powershell
+.\scripts\Build-Installer.ps1
+```
+
+This requires the Inno Setup compiler (`iscc.exe`) to be installed and available in `PATH`.
+
+Installer output:
+
+```text
+artifacts\installer\
 ```
 
 ## Configuration
 
-`config.toml` is created automatically on first start and lives next to the app output.
+`config.toml` is created automatically on first start and lives in:
+
+```text
+%APPDATA%\command-to-translate\config.toml
+```
+
+If an older `config.toml` exists next to the executable, the app copies it to `%APPDATA%` on first start and keeps using the `%APPDATA%` copy afterwards.
 
 Example:
 
@@ -122,11 +142,14 @@ The selected source/target pair is also used to build the prompt sent to Ollama,
 5. Press your configured hotkey.
 6. Wait for the text to be replaced with the translation.
 
+When installed through the Windows installer, the app can also start automatically with Windows. The tray menu includes `Start with Windows` so users can change that setting later.
+
 Tray menu:
 
 - `Enable hotkey translation`
 - `Select translation languages...`
 - `Change hotkey...`
+- `Start with Windows`
 - `Open config file`
 - `About`
 - `Exit`
@@ -140,6 +163,7 @@ dotnet test command-to-translate.slnx
 ```
 
 The repository also includes CI in `.github/workflows/dotnet.yml` for restore, build, and test on `main`.
+Tagged releases and manual release runs use `.github/workflows/release.yml` to build a self-contained publish directory and a Windows installer artifact.
 
 ## Logs
 

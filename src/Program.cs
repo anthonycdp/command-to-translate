@@ -17,6 +17,7 @@ static class Program
     private static OnDemandTranslationCoordinator? _translationCoordinator;
     private static HotkeyManager? _hotkeyManager;
     private static HotkeyRebindingService? _hotkeyRebindingService;
+    private static IStartupRegistrationService? _startupRegistrationService;
     private static TrayIcon? _trayIcon;
     private static KeyboardHook? _keyboardHook;
     private static BufferManager? _bufferManager;
@@ -93,6 +94,7 @@ static class Program
 
             // Step 4: Create UI - need a message-only window for hotkeys
             _trayIcon = new TrayIcon(_state);
+            _startupRegistrationService = new WindowsStartupRegistrationService();
             Logger.Info("TrayIcon created");
 
             // Create a hidden form for receiving hotkey messages
@@ -140,6 +142,11 @@ static class Program
                     "command-to-translate",
                     $"Hotkey translation {status}",
                     ToolTipIcon.Info);
+            };
+
+            _trayIcon.StartWithWindowsToggleRequested += (s, e) =>
+            {
+                ToggleStartWithWindows();
             };
 
             _trayIcon.TranslationLanguagesSelected += (s, e) =>
@@ -196,7 +203,8 @@ static class Program
             // Step 7: Health check loop (every 30s)
             _ = StartHealthCheckLoop();
 
-            // Step 8: Initial health check
+            // Step 8: Sync startup option and run initial health check
+            SyncStartupRegistration(showErrorNotification: false);
             _ = PerformInitialHealthCheck();
 
             // Step 9: Run message loop
@@ -233,6 +241,53 @@ static class Program
                     result.Message,
                     ToolTipIcon.Warning);
             }
+        }
+    }
+
+    private static void ToggleStartWithWindows()
+    {
+        var currentStatus = _startupRegistrationService!.GetStatus();
+        if (!currentStatus.Success)
+        {
+            Logger.Warning(currentStatus.Message);
+            if (_state!.Config.Ui.NotifyOnError)
+            {
+                _trayIcon!.ShowNotification("command-to-translate", currentStatus.Message, ToolTipIcon.Warning);
+            }
+
+            return;
+        }
+
+        var updatedStatus = _startupRegistrationService.SetEnabled(!currentStatus.IsEnabled);
+        _trayIcon!.SetStartWithWindowsEnabled(updatedStatus.IsEnabled);
+
+        if (!updatedStatus.Success)
+        {
+            Logger.Warning(updatedStatus.Message);
+            if (_state!.Config.Ui.NotifyOnError)
+            {
+                _trayIcon.ShowNotification("command-to-translate", updatedStatus.Message, ToolTipIcon.Warning);
+            }
+
+            return;
+        }
+
+        Logger.Info(updatedStatus.Message);
+        _trayIcon.ShowNotification("command-to-translate", updatedStatus.Message, ToolTipIcon.Info);
+    }
+
+    private static void SyncStartupRegistration(bool showErrorNotification)
+    {
+        var status = _startupRegistrationService!.GetStatus();
+        _trayIcon!.SetStartWithWindowsEnabled(status.IsEnabled);
+
+        if (status.Success)
+            return;
+
+        Logger.Warning(status.Message);
+        if (showErrorNotification && _state!.Config.Ui.NotifyOnError)
+        {
+            _trayIcon.ShowNotification("command-to-translate", status.Message, ToolTipIcon.Warning);
         }
     }
 

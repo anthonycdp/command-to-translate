@@ -11,12 +11,11 @@ public class AppConfig
     public HotkeyConfig Hotkey { get; set; } = new();
     public UiConfig Ui { get; set; } = new();
 
-    private static readonly string ConfigPath = Path.Combine(
-        AppDomain.CurrentDomain.BaseDirectory, "config.toml");
-
     public static AppConfig Load()
     {
-        if (!File.Exists(ConfigPath))
+        TryMigrateLegacyConfig();
+
+        if (!File.Exists(AppPaths.ConfigPath))
         {
             var defaultConfig = new AppConfig();
             defaultConfig.Save();
@@ -25,7 +24,7 @@ public class AppConfig
 
         try
         {
-            var content = File.ReadAllText(ConfigPath);
+            var content = File.ReadAllText(AppPaths.ConfigPath);
             return Toml.ToModel<AppConfig>(content).Normalize();
         }
         catch (TomlException)
@@ -45,6 +44,7 @@ public class AppConfig
     public void Save()
     {
         Normalize();
+        AppPaths.EnsureAppDirectories();
         var toml = Toml.FromModel(new PersistedAppConfig
         {
             Ollama = Ollama,
@@ -53,7 +53,12 @@ public class AppConfig
             Hotkey = Hotkey,
             Ui = Ui
         });
-        File.WriteAllText(ConfigPath, toml);
+        File.WriteAllText(AppPaths.ConfigPath, toml);
+    }
+
+    internal static string GetConfigPath()
+    {
+        return AppPaths.ConfigPath;
     }
 
     internal AppConfig Normalize()
@@ -67,6 +72,15 @@ public class AppConfig
         Translation.Normalize();
         Hotkey.Normalize();
         return this;
+    }
+
+    private static void TryMigrateLegacyConfig()
+    {
+        if (File.Exists(AppPaths.ConfigPath) || !File.Exists(AppPaths.LegacyConfigPath))
+            return;
+
+        AppPaths.EnsureAppDirectories();
+        File.Copy(AppPaths.LegacyConfigPath, AppPaths.ConfigPath, overwrite: false);
     }
 }
 

@@ -3,19 +3,23 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using RealTranslate.Core;
+using CommandToTranslate.Core;
 
-namespace RealTranslate.Services;
+namespace CommandToTranslate.Services;
 
 /// <summary>
 /// Service for communicating with Ollama API for translation.
 /// Handles Portuguese (pt-BR) to English (en-US) translation.
 /// </summary>
-public class TranslationService : IDisposable
+public class TranslationService : IDisposable, ITextTranslator
 {
+    private const int MinimumRecommendedTimeoutMs = 8000;
+
     private readonly AppState _state;
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly string _endpoint;
+    private readonly string _keepAlive;
     private bool _disposed;
 
     // Rate limiting for error notifications
@@ -23,24 +27,36 @@ public class TranslationService : IDisposable
     private readonly TimeSpan _notificationCooldown = TimeSpan.FromSeconds(30);
 
     // System prompt for translation
-    private const string SystemPrompt = @"You are a precise translator from Brazilian Portuguese (pt-BR) to American English (en-US).
+    private const string SystemPrompt = @"You are a deterministic translator from Brazilian Portuguese (pt-BR) to American English (en-US).
 
 Rules:
-- Translate ONLY the given text. Do not add explanations, notes, or alternatives.
-- Preserve the tone and register of the original text.
+- Translate ONLY the given text exactly once.
+- Never ask for clarification.
+- Never explain ambiguity.
+- If the input is a single word, translate it to the most common neutral English equivalent.
+- Preserve the tone and register of the original text when possible.
 - Keep punctuation appropriate for the target language.
 - If the text is already in English, return it unchanged.
-- For informal/slang terms, use equivalent American English slang.
+- Prefer natural American English.
 - Return ONLY the translation, nothing else.";
 
     public TranslationService(AppState state)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _endpoint = NormalizeEndpoint(_state.Config.Ollama.Endpoint);
+        _keepAlive = _state.Config.Ollama.KeepAlive;
+        var timeoutMs = Math.Max(_state.Config.Ollama.TimeoutMs, MinimumRecommendedTimeoutMs);
 
         _httpClient = new HttpClient
         {
-            Timeout = TimeSpan.FromMilliseconds(_state.Config.Ollama.TimeoutMs)
+            Timeout = TimeSpan.FromMilliseconds(timeoutMs)
         };
+
+        if (_state.Config.Ollama.TimeoutMs < MinimumRecommendedTimeoutMs)
+        {
+            Logger.Warning(
+                $"Configured Ollama timeout {_state.Config.Ollama.TimeoutMs}ms is too low for chat responses; using {timeoutMs}ms.");
+        }
 
         _jsonOptions = new JsonSerializerOptions
         {
@@ -64,7 +80,6 @@ Rules:
         if (!_state.OllamaAvailable)
             return null;
 
-        var endpoint = _state.Config.Ollama.Endpoint.TrimEnd('/');
         var model = _state.Config.Ollama.Model;
         var temperature = _state.Config.Ollama.Temperature;
         var stream = _state.Config.Ollama.Stream;
@@ -73,6 +88,7 @@ Rules:
         {
             Model = model,
             Stream = stream,
+            KeepAlive = _keepAlive,
             Options = new OllamaOptions { Temperature = temperature },
             Messages = new List<OllamaMessage>
             {
@@ -84,7 +100,7 @@ Rules:
         try
         {
             var response = await _httpClient.PostAsJsonAsync(
-                $"{endpoint}/api/chat",
+                $"{_endpoint}/api/chat",
                 requestBody,
                 _jsonOptions,
                 ct);
@@ -144,13 +160,13 @@ Rules:
         // Single retry for empty response
         try
         {
-            var endpoint = _state.Config.Ollama.Endpoint.TrimEnd('/');
             var model = _state.Config.Ollama.Model;
 
             var requestBody = new OllamaChatRequest
             {
                 Model = model,
                 Stream = false,
+                KeepAlive = _keepAlive,
                 Options = new OllamaOptions { Temperature = _state.Config.Ollama.Temperature },
                 Messages = new List<OllamaMessage>
                 {
@@ -160,7 +176,7 @@ Rules:
             };
 
             var response = await _httpClient.PostAsJsonAsync(
-                $"{endpoint}/api/chat",
+                $"{_endpoint}/api/chat",
                 requestBody,
                 _jsonOptions,
                 ct);
@@ -183,12 +199,11 @@ Rules:
     /// <returns>True if Ollama is healthy and model is available.</returns>
     public async Task<(bool IsHealthy, string? ErrorMessage)> CheckHealthAsync()
     {
-        var endpoint = _state.Config.Ollama.Endpoint.TrimEnd('/');
         var model = _state.Config.Ollama.Model;
 
         try
         {
-            var response = await _httpClient.GetAsync($"{endpoint}/api/tags");
+            var response = await _httpClient.GetAsync($"{_endpoint}/api/tags");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -283,6 +298,27 @@ Rules:
         }
     }
 
+    private static string NormalizeEndpoint(string endpoint)
+    {
+        var normalized = endpoint.TrimEnd('/');
+
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
+            return normalized;
+
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+            !uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Host = "127.0.0.1"
+        };
+
+        return builder.Uri.ToString().TrimEnd('/');
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -301,6 +337,7 @@ internal class OllamaChatRequest
 {
     public string Model { get; set; } = "";
     public bool Stream { get; set; }
+    public string? KeepAlive { get; set; }
     public OllamaOptions? Options { get; set; }
     public List<OllamaMessage> Messages { get; set; } = new();
 }

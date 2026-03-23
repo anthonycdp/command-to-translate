@@ -1,11 +1,10 @@
-using System.Diagnostics;
 using System.Windows.Forms;
-using RealTranslate.Core;
-using RealTranslate.Hooks;
-using RealTranslate.Services;
-using RealTranslate.UI;
+using CommandToTranslate.Core;
+using CommandToTranslate.Hooks;
+using CommandToTranslate.Services;
+using CommandToTranslate.UI;
 
-namespace RealTranslate;
+namespace CommandToTranslate;
 
 /// <summary>
 /// Application entry point. Wires all components together and manages the application lifecycle.
@@ -15,15 +14,35 @@ static class Program
     private static readonly CancellationTokenSource AppCancellation = new();
     private static AppState? _state;
     private static TranslationService? _translationService;
-    private static BufferManager? _bufferManager;
-    private static Injector? _injector;
-    private static KeyboardHook? _keyboardHook;
+    private static OnDemandTranslationCoordinator? _translationCoordinator;
     private static HotkeyManager? _hotkeyManager;
     private static TrayIcon? _trayIcon;
+    private static KeyboardHook? _keyboardHook;
+    private static BufferManager? _bufferManager;
 
     [STAThread]
     static void Main()
     {
+        // Initialize logger first
+        Logger.LogStartup();
+
+        // Set up global exception handlers
+        Application.ThreadException += (s, e) =>
+        {
+            Logger.Error("Unhandled thread exception", e.Exception);
+            MessageBox.Show(
+                $"Error: {e.Exception.Message}\n\nLog file: {Logger.LogFilePath}",
+                "command-to-translate Error",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+        {
+            var ex = e.ExceptionObject as Exception;
+            Logger.Error("Unhandled domain exception", ex);
+        };
+
         // Set up application
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();
@@ -31,45 +50,79 @@ static class Program
 
         try
         {
+            Logger.Info("Loading configuration...");
+
             // Step 1: Load configuration
             var config = AppConfig.Load();
+            Logger.Info($"Configuration loaded. Ollama endpoint: {config.Ollama.Endpoint}");
 
             // Step 2: Create AppState with config
             _state = new AppState { Config = config };
+            Logger.Info("AppState created");
 
             // Step 3: Create all services
             _translationService = new TranslationService(_state);
-            _bufferManager = new BufferManager(_state);
-            _injector = new Injector(_state, _bufferManager);
+            var focusContextService = new FocusContextService();
+            var clipboardService = new ClipboardService();
+            var inputDispatcher = new InputDispatcher(_state);
 
-            // Step 4: Create hooks
-            _keyboardHook = new KeyboardHook(_state);
+            // Keystroke buffer: captures typed text for TUI terminals where
+            // clipboard-based select+copy is impossible.
+            _bufferManager = new BufferManager();
+            _keyboardHook = new KeyboardHook(_state, _bufferManager);
+            _keyboardHook.Start();
+            Logger.Info("KeyboardHook and BufferManager started");
 
-            // Step 5: Create UI - need a message-only window for hotkeys
+            var adapters = new ITranslationTargetAdapter[]
+            {
+                new WindowsTerminalLineAdapter(),
+                new ClassicConsoleLineAdapter(),
+                new ElectronTerminalAdapter(),
+                new GenericTextFieldAdapter()
+            };
+            _translationCoordinator = new OnDemandTranslationCoordinator(
+                _state,
+                _translationService,
+                focusContextService,
+                clipboardService,
+                inputDispatcher,
+                adapters,
+                _bufferManager);
+            Logger.Info("Services created");
+
+            // Step 4: Create UI - need a message-only window for hotkeys
             _trayIcon = new TrayIcon(_state);
+            Logger.Info("TrayIcon created");
 
             // Create a hidden form for receiving hotkey messages
             using var messageWindow = new MessageWindow();
             _hotkeyManager = new HotkeyManager(_state, messageWindow.Handle);
+            Logger.Info("HotkeyManager created");
 
             // Step 6: Register hotkey
             if (!_hotkeyManager.Register())
             {
+                Logger.Warning("Failed to register hotkey");
                 _trayIcon.ShowNotification(
-                    "real-translate",
+                    "command-to-translate",
                     "Failed to register hotkey. It may be in use by another application.",
                     ToolTipIcon.Warning);
             }
-
-            // Step 7: Wire events
-            _hotkeyManager.HotkeyPressed += (s, e) =>
+            else
             {
-                _state!.IsPaused = !_state.IsPaused;
-                _trayIcon!.UpdateIcon();
+                Logger.Info("Hotkey registered successfully");
+            }
+
+            // Step 6: Wire events
+            _hotkeyManager.HotkeyPressed += async (s, e) =>
+            {
+                Logger.Info("Hotkey pressed - starting on-demand translation");
+                await HandleHotkeyAsync();
             };
 
             _trayIcon.ExitRequested += (s, e) =>
             {
+                Logger.Info("Exit requested from tray");
                 AppCancellation.Cancel();
                 Application.Exit();
             };
@@ -79,10 +132,11 @@ static class Program
                 _state!.IsPaused = !_state.IsPaused;
                 _trayIcon!.UpdateIcon();
 
-                var status = _state.IsPaused ? "Paused" : "Active";
+                var status = _state.IsPaused ? "Disabled" : "Enabled";
+                Logger.Info($"Hotkey toggled: {status}");
                 _trayIcon.ShowNotification(
-                    "real-translate",
-                    $"Translation {status}",
+                    "command-to-translate",
+                    $"Hotkey translation {status}",
                     ToolTipIcon.Info);
             };
 
@@ -92,155 +146,46 @@ static class Program
                 return _hotkeyManager.ProcessMessage(msg, wParam);
             };
 
-            // Step 8: Start keyboard hook
-            _keyboardHook.Start();
+            // Step 7: Health check loop (every 30s)
+            _ = StartHealthCheckLoop();
 
-            // Step 9: Start processing loops (3 background tasks)
-            var keyboardProcessorTask = StartKeyboardEventProcessor();
-            var translationProcessorTask = StartTranslationProcessor();
-            var injectionProcessorTask = StartInjectionProcessor();
-
-            // Step 10: Health check loop (every 30s)
-            var healthCheckTask = StartHealthCheckLoop();
-
-            // Step 11: Initial health check
+            // Step 8: Initial health check
             _ = PerformInitialHealthCheck();
 
-            // Step 12: Run message loop
+            // Step 9: Run message loop
+            Logger.Info("Starting message loop...");
             Application.Run(messageWindow);
 
-            // Step 13: Cleanup on exit
+            // Step 10: Cleanup on exit
+            Logger.Info("Application exiting, cleaning up...");
             Cleanup();
+            Logger.LogShutdown();
         }
         catch (Exception ex)
         {
+            Logger.Error("Fatal error in Main", ex);
             MessageBox.Show(
-                $"Fatal error: {ex.Message}",
-                "real-translate",
+                $"Fatal error: {ex.Message}\n\nLog file: {Logger.LogFilePath}",
+                "command-to-translate",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
     }
 
-    /// <summary>
-    /// Processes keyboard events from the channel and sends them to BufferManager.
-    /// Results in translation tasks being queued.
-    /// </summary>
-    private static async Task StartKeyboardEventProcessor()
+    private static async Task HandleHotkeyAsync()
     {
-        var reader = AppChannels.KeyboardEvents.Reader;
-
-        try
+        var result = await _translationCoordinator!.ExecuteAsync(AppCancellation.Token);
+        if (!result.Success)
         {
-            await foreach (var kbEvent in reader.ReadAllAsync(AppCancellation.Token))
+            Logger.Warning($"On-demand translation skipped: {result.Message}");
+
+            if (_state!.Config.Ui.NotifyOnError)
             {
-                if (AppCancellation.Token.IsCancellationRequested)
-                    break;
-
-                var translationTask = _bufferManager!.ProcessEvent(kbEvent);
-
-                if (translationTask != null)
-                {
-                    await AppChannels.TranslationTasks.Writer.WriteAsync(
-                        translationTask,
-                        AppCancellation.Token);
-                }
+                _trayIcon!.ShowNotification(
+                    "command-to-translate",
+                    result.Message,
+                    ToolTipIcon.Warning);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Keyboard processor error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Processes translation tasks from the channel, calls TranslationService,
-    /// and queues results for injection.
-    /// </summary>
-    private static async Task StartTranslationProcessor()
-    {
-        var reader = AppChannels.TranslationTasks.Reader;
-
-        try
-        {
-            await foreach (var task in reader.ReadAllAsync(AppCancellation.Token))
-            {
-                if (AppCancellation.Token.IsCancellationRequested)
-                    break;
-
-                // Skip if paused or Ollama unavailable
-                if (_state!.IsPaused || !_state.OllamaAvailable)
-                    continue;
-
-                // Translate the text
-                var translated = await _translationService!.TranslateAsync(
-                    task.Text,
-                    task.CancellationToken);
-
-                if (string.IsNullOrEmpty(translated))
-                    continue;
-
-                // Create injection task
-                var injectionTask = new InjectionTask(
-                    translated,
-                    task.CharactersToDelete,
-                    task.Mode == TranslationMode.PhraseWithContext);
-
-                await AppChannels.InjectionTasks.Writer.WriteAsync(
-                    injectionTask,
-                    AppCancellation.Token);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Translation processor error: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Processes injection tasks from the channel and injects translated text.
-    /// </summary>
-    private static async Task StartInjectionProcessor()
-    {
-        var reader = AppChannels.InjectionTasks.Reader;
-
-        try
-        {
-            await foreach (var task in reader.ReadAllAsync(AppCancellation.Token))
-            {
-                if (AppCancellation.Token.IsCancellationRequested)
-                    break;
-
-                // Skip if paused
-                if (_state!.IsPaused)
-                    continue;
-
-                // Inject the translated text
-                if (task.IsRefinement)
-                {
-                    await _injector!.InjectRefinementAsync(task.TranslatedText, AppCancellation.Token);
-                }
-                else
-                {
-                    await _injector!.InjectAsync(task, AppCancellation.Token);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Injection processor error: {ex.Message}");
         }
     }
 
@@ -249,6 +194,7 @@ static class Program
     /// </summary>
     private static async Task StartHealthCheckLoop()
     {
+        Logger.Info("Health check loop started");
         while (!AppCancellation.Token.IsCancellationRequested)
         {
             try
@@ -260,6 +206,8 @@ static class Program
                 var wasAvailable = _state!.OllamaAvailable;
                 _state.OllamaAvailable = isHealthy;
 
+                Logger.Info($"Health check: Ollama {(isHealthy ? "available" : "unavailable")}");
+
                 // Update tray icon if availability changed
                 if (wasAvailable != isHealthy)
                 {
@@ -268,7 +216,7 @@ static class Program
                     if (!isHealthy && _state.Config.Ui.NotifyOnError)
                     {
                         _trayIcon.ShowNotification(
-                            "real-translate - Error",
+                            "command-to-translate - Error",
                             errorMessage ?? "Ollama unavailable",
                             ToolTipIcon.Error);
                     }
@@ -281,7 +229,7 @@ static class Program
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Health check error: {ex.Message}");
+                Logger.Error("Health check error", ex);
                 _state!.OllamaAvailable = false;
                 _trayIcon!.UpdateIcon();
             }
@@ -293,6 +241,7 @@ static class Program
     /// </summary>
     private static async Task PerformInitialHealthCheck()
     {
+        Logger.Info("Performing initial health check...");
         try
         {
             var (isHealthy, errorMessage) = await _translationService!.CheckHealthAsync();
@@ -300,17 +249,19 @@ static class Program
             _state!.OllamaAvailable = isHealthy;
             _trayIcon!.UpdateIcon();
 
+            Logger.Info($"Initial health check result: {(isHealthy ? "OK" : errorMessage)}");
+
             if (!isHealthy && _state.Config.Ui.NotifyOnError)
             {
                 _trayIcon.ShowNotification(
-                    "real-translate - Startup Error",
+                    "command-to-translate - Startup Error",
                     errorMessage ?? "Ollama unavailable. Please start Ollama.",
                     ToolTipIcon.Error);
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Initial health check error: {ex.Message}");
+            Logger.Error("Initial health check error", ex);
             _state!.OllamaAvailable = false;
             _trayIcon!.UpdateIcon();
         }
@@ -324,10 +275,10 @@ static class Program
         AppCancellation.Cancel();
 
         _keyboardHook?.Dispose();
+        _bufferManager?.Dispose();
         _hotkeyManager?.Dispose();
         _trayIcon?.Dispose();
         _translationService?.Dispose();
-        _bufferManager?.Dispose();
         AppCancellation.Dispose();
     }
 }

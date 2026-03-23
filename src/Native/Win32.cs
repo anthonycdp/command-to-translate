@@ -1,7 +1,7 @@
 // src/Native/Win32.cs
 using System.Runtime.InteropServices;
 
-namespace RealTranslate.Native;
+namespace CommandToTranslate.Native;
 
 /// <summary>
 /// All Windows API P/Invoke declarations in one place.
@@ -30,6 +30,17 @@ public static class Win32
     public const int WH_KEYBOARD_LL = 13;
     public const int WM_KEYDOWN = 0x0100;
     public const int WM_SYSKEYDOWN = 0x0104;
+    public const uint LLKHF_INJECTED = 0x00000010;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KBDLLHOOKSTRUCT
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
 
     #endregion
 
@@ -58,10 +69,10 @@ public static class Win32
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     /// <summary>
-    /// INPUT structure for SendInput. Uses explicit layout for x64 compatibility.
-    /// On x64: Type (4 bytes) + padding (4 bytes) + union (24 bytes) = 32 bytes total.
+    /// INPUT structure for SendInput. On x64 the INPUT union is 32 bytes,
+    /// so the full structure is 40 bytes (type + padding + union).
     /// </summary>
-    [StructLayout(LayoutKind.Explicit, Size = 32)]
+    [StructLayout(LayoutKind.Explicit, Size = 40)]
     public struct INPUT
     {
         [FieldOffset(0)] public uint Type;
@@ -86,6 +97,7 @@ public static class Win32
     public const uint KEYEVENTF_UNICODE = 0x0004;
 
     public const ushort VK_BACK = 0x08;
+    public const ushort VK_DELETE = 0x2E;
     public const ushort VK_RETURN = 0x0D;
     public const ushort VK_SPACE = 0x20;
 

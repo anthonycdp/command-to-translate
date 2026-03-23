@@ -1,26 +1,19 @@
 // src/Core/AppState.cs
-namespace RealTranslate.Core;
+namespace CommandToTranslate.Core;
 
 /// <summary>
-/// Global application state shared across components.
-/// Uses volatile for simple flags, lock for complex state.
+/// Mutable runtime state shared by the long-lived application services.
 /// </summary>
-public class AppState
+public sealed class AppState
 {
     private readonly object _lock = new();
-
-    // Volatile flags for lock-free reads
     public volatile bool IsPaused;
-    public volatile bool IsInjecting;
     public volatile bool OllamaAvailable = true;
-
-    // State requiring synchronization
     private bool _errorNotificationShown;
-    private DateTime? _lastErrorTime;
 
     public AppConfig Config { get; set; } = null!;
 
-    public bool ShouldTranslate => !IsPaused && !IsInjecting && OllamaAvailable;
+    public bool IsEnabled => !IsPaused;
 
     public bool TryMarkErrorNotification()
     {
@@ -30,7 +23,6 @@ public class AppState
                 return false;
 
             _errorNotificationShown = true;
-            _lastErrorTime = DateTime.UtcNow;
             return true;
         }
     }
@@ -48,7 +40,6 @@ public class AppState
         lock (_lock)
         {
             _errorNotificationShown = false;
-            _lastErrorTime = null;
             OllamaAvailable = true;
         }
     }

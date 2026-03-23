@@ -1,11 +1,10 @@
 // src/Core/Config.cs
 using Tomlyn;
 
-namespace RealTranslate.Core;
+namespace CommandToTranslate.Core;
 
 public class AppConfig
 {
-    public TranslationConfig Translation { get; set; } = new();
     public OllamaConfig Ollama { get; set; } = new();
     public BehaviorConfig Behavior { get; set; } = new();
     public HotkeyConfig Hotkey { get; set; } = new();
@@ -49,26 +48,21 @@ public class AppConfig
     }
 }
 
-public class TranslationConfig
-{
-    public string SourceLang { get; set; } = "pt-BR";
-    public string TargetLang { get; set; } = "en-US";
-}
-
 public class OllamaConfig
 {
-    public string Endpoint { get; set; } = "http://localhost:11434";
+    public string Endpoint { get; set; } = "http://127.0.0.1:11434";
     public string Model { get; set; } = "translategemma";
-    public int TimeoutMs { get; set; } = 2000;
-    public double Temperature { get; set; } = 0.1;
+    public int TimeoutMs { get; set; } = 10000;
+    public double Temperature { get; set; } = 0.0;
     public bool Stream { get; set; } = false;
+    public string KeepAlive { get; set; } = "5m";
 }
 
 public class BehaviorConfig
 {
-    public int DebounceMs { get; set; } = 500;
-    public int InjectDelayMs { get; set; } = 10;
-    public int LoopProtectionMs { get; set; } = 50;
+    public int ShortcutStepDelayMs { get; set; } = 35;
+    public int ClipboardTimeoutMs { get; set; } = 800;
+    public int HostSettleDelayMs { get; set; } = 60;
 }
 
 public class HotkeyConfig

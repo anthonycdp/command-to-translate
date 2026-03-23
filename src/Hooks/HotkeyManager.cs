@@ -1,12 +1,12 @@
 // src/Hooks/HotkeyManager.cs
 using System.Runtime.InteropServices;
-using RealTranslate.Core;
-using RealTranslate.Native;
+using CommandToTranslate.Core;
+using CommandToTranslate.Native;
 
-namespace RealTranslate.Hooks;
+namespace CommandToTranslate.Hooks;
 
 /// <summary>
-/// Manages global hotkey registration for toggling translation on/off.
+/// Manages global hotkey registration for on-demand translation.
 /// Uses the RegisterHotKey Win32 API for system-wide hotkey detection.
 /// </summary>
 public class HotkeyManager : IDisposable
@@ -25,7 +25,7 @@ public class HotkeyManager : IDisposable
     /// <summary>
     /// Creates a new HotkeyManager instance.
     /// </summary>
-    /// <param name="appState">The application state to toggle.</param>
+    /// <param name="appState">The application state containing hotkey configuration.</param>
     /// <param name="windowHandle">The window handle to register the hotkey with.</param>
     /// <param name="hotkeyId">Unique identifier for the hotkey (default: 1).</param>
     public HotkeyManager(AppState appState, IntPtr windowHandle, int hotkeyId = 1)
@@ -85,9 +85,6 @@ public class HotkeyManager : IDisposable
         int hotkeyId = wParam.ToInt32();
         if (hotkeyId != _hotkeyId)
             return false;
-
-        // Toggle the paused state
-        _appState.IsPaused = !_appState.IsPaused;
 
         // Raise the event
         HotkeyPressed?.Invoke(this, EventArgs.Empty);

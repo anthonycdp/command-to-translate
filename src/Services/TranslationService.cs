@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using CommandToTranslate.Core;
 
 namespace CommandToTranslate.Services;
@@ -14,6 +15,13 @@ namespace CommandToTranslate.Services;
 public class TranslationService : IDisposable, ITextTranslator
 {
     private const int MinimumRecommendedTimeoutMs = 8000;
+    private const string LineBreakToken = "[[CTT_LINE_BREAK]]";
+    private static readonly Regex ProtectedLineBreakPattern = new(
+        @"\[\[\s*CTT_LINE_BREAK\s*\]\]",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex MissingSentenceSpacePattern = new(
+        @"(?<=[\p{Ll}\p{Nd}\)\]])(?<punct>[.!?])(?=[\p{Lu}])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly AppState _state;
     private readonly HttpClient _httpClient;
@@ -69,6 +77,7 @@ public class TranslationService : IDisposable, ITextTranslator
         var model = _state.Config.Ollama.Model;
         var temperature = _state.Config.Ollama.Temperature;
         var stream = _state.Config.Ollama.Stream;
+        var preparedText = PrepareTextForTranslation(text);
 
         var requestBody = CreateChatRequest(
             model,
@@ -76,7 +85,7 @@ public class TranslationService : IDisposable, ITextTranslator
             _keepAlive,
             temperature,
             _state.ActiveTranslationPair,
-            text);
+            preparedText);
 
         try
         {
@@ -104,7 +113,7 @@ public class TranslationService : IDisposable, ITextTranslator
             _state.ClearErrorNotification();
             _state.OllamaAvailable = true;
 
-            return result.Message.Content.Trim();
+            return FinalizeTranslatedText(text, result.Message.Content);
         }
         catch (HttpRequestException ex) when (ex.InnerException is System.Net.Sockets.SocketException)
         {
@@ -142,6 +151,7 @@ public class TranslationService : IDisposable, ITextTranslator
         try
         {
             var model = _state.Config.Ollama.Model;
+            var preparedText = PrepareTextForTranslation(text);
 
             var requestBody = CreateChatRequest(
                 model,
@@ -149,7 +159,7 @@ public class TranslationService : IDisposable, ITextTranslator
                 _keepAlive,
                 _state.Config.Ollama.Temperature,
                 _state.ActiveTranslationPair,
-                text);
+                preparedText);
 
             var response = await _httpClient.PostAsJsonAsync(
                 $"{_endpoint}/api/chat",
@@ -161,7 +171,9 @@ public class TranslationService : IDisposable, ITextTranslator
                 return null;
 
             var result = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(_jsonOptions, ct);
-            return result?.Message?.Content?.Trim();
+            return result?.Message?.Content is null
+                ? null
+                : FinalizeTranslatedText(text, result.Message.Content);
         }
         catch
         {
@@ -268,9 +280,7 @@ public class TranslationService : IDisposable, ITextTranslator
         if (_state.TryMarkErrorNotification())
         {
             _lastNotificationTime = now;
-            // In a real implementation, this would show a notification
-            // For now, we just mark the state so the UI can handle it
-            Console.Error.WriteLine($"[TranslationService] {message}");
+            Logger.Error(message);
         }
     }
 
@@ -328,11 +338,92 @@ Rules:
 - Never ask for clarification.
 - Never explain ambiguity.
 - If the input is a single word, translate it to the most common neutral equivalent in the target language.
+- Preserve the original structure exactly, including headings, lists, blank lines, and paragraph breaks.
+- If the input contains {LineBreakToken}, keep every token exactly as written and in the same order. Each token represents an original line break.
+- Do not merge, remove, reorder, or invent line breaks.
 - Preserve the tone and register of the original text when possible.
+- Preserve readable spacing between sentences and after punctuation.
 - Keep punctuation appropriate for the target language.
 - If the text is already in {translationPair.TargetLanguage.Code}, return it unchanged.
 - Prefer natural, idiomatic usage in the target language.
 - Return ONLY the translation, nothing else.";
+    }
+
+    internal static string PrepareTextForTranslation(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (text.Length == 0)
+            return text;
+
+        return NormalizeLineEndings(text).Replace("\n", LineBreakToken, StringComparison.Ordinal);
+    }
+
+    internal static string FinalizeTranslatedText(string sourceText, string translatedText)
+    {
+        ArgumentNullException.ThrowIfNull(sourceText);
+        ArgumentNullException.ThrowIfNull(translatedText);
+
+        var normalizedTranslation = translatedText.Trim();
+        if (normalizedTranslation.Length == 0)
+            return normalizedTranslation;
+
+        var restoredTranslation = RestoreProtectedLineBreaks(normalizedTranslation);
+        var repairedSpacing = RepairCollapsedSentenceSpacing(restoredTranslation);
+        var preservedBoundaries = ReapplyBoundaryWhitespace(sourceText, repairedSpacing);
+
+        return MatchSourceLineEndings(sourceText, preservedBoundaries);
+    }
+
+    private static string RestoreProtectedLineBreaks(string text)
+    {
+        return ProtectedLineBreakPattern.Replace(NormalizeLineEndings(text), "\n");
+    }
+
+    private static string RepairCollapsedSentenceSpacing(string text)
+    {
+        return MissingSentenceSpacePattern.Replace(text, "${punct} ");
+    }
+
+    private static string ReapplyBoundaryWhitespace(string sourceText, string translatedText)
+    {
+        var coreText = translatedText.Trim();
+        if (coreText.Length == 0)
+            return coreText;
+
+        return GetLeadingBoundaryWhitespace(sourceText) + coreText + GetTrailingBoundaryWhitespace(sourceText);
+    }
+
+    private static string GetLeadingBoundaryWhitespace(string text)
+    {
+        var count = 0;
+        while (count < text.Length && char.IsWhiteSpace(text[count]))
+            count++;
+
+        return count == 0 ? string.Empty : text[..count];
+    }
+
+    private static string GetTrailingBoundaryWhitespace(string text)
+    {
+        var count = 0;
+        while (count < text.Length && char.IsWhiteSpace(text[text.Length - 1 - count]))
+            count++;
+
+        return count == 0 ? string.Empty : text[^count..];
+    }
+
+    private static string MatchSourceLineEndings(string sourceText, string translatedText)
+    {
+        var normalizedTranslation = NormalizeLineEndings(translatedText);
+        if (!sourceText.Contains("\r\n", StringComparison.Ordinal))
+            return normalizedTranslation;
+
+        return normalizedTranslation.Replace("\n", "\r\n", StringComparison.Ordinal);
+    }
+
+    private static string NormalizeLineEndings(string text)
+    {
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
     public void Dispose()

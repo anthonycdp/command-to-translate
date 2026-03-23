@@ -74,19 +74,42 @@ public sealed class InputDispatcher : IInputDispatcher
         if (string.IsNullOrEmpty(text))
             return;
 
-        foreach (var character in text)
+        foreach (var step in BuildTextInputSequence(text))
         {
-            var inputs = BuildUnicodeInputs(character);
-            var sent = Win32.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Win32.INPUT>());
-            if (sent != inputs.Length)
+            await SendTextInputStepAsync(step, ct);
+        }
+    }
+
+    internal static IReadOnlyList<TextInputStep> BuildTextInputSequence(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (text.Length == 0)
+            return [];
+
+        var steps = new List<TextInputStep>(text.Length);
+        for (var index = 0; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (character == '\r')
             {
-                throw new InvalidOperationException(
-                    $"SendInput failed for text typing. Sent={sent}, Expected={inputs.Length}, LastError={Marshal.GetLastWin32Error()}");
+                if (index + 1 < text.Length && text[index + 1] == '\n')
+                    index++;
+
+                steps.Add(TextInputStep.ForVirtualKey(Win32.VK_RETURN));
+                continue;
             }
 
-            if (_stepDelay > TimeSpan.Zero)
-                await Task.Delay(_stepDelay, ct);
+            if (character == '\n')
+            {
+                steps.Add(TextInputStep.ForVirtualKey(Win32.VK_RETURN));
+                continue;
+            }
+
+            steps.Add(TextInputStep.ForCharacter(character));
         }
+
+        return steps;
     }
 
     private static Win32.INPUT[] BuildChordInputs(IReadOnlyList<ushort> virtualKeys)
@@ -138,6 +161,26 @@ public sealed class InputDispatcher : IInputDispatcher
         ];
     }
 
+    private async Task SendTextInputStepAsync(TextInputStep step, CancellationToken ct)
+    {
+        var inputs = step.Kind switch
+        {
+            TextInputKind.UnicodeCharacter => BuildUnicodeInputs(step.Character),
+            TextInputKind.VirtualKey => [CreateKeyInput(step.VirtualKey, keyUp: false), CreateKeyInput(step.VirtualKey, keyUp: true)],
+            _ => throw new ArgumentOutOfRangeException(nameof(step), step.Kind, "Unsupported text input step kind")
+        };
+
+        var sent = Win32.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Win32.INPUT>());
+        if (sent != inputs.Length)
+        {
+            throw new InvalidOperationException(
+                $"SendInput failed for text typing. Sent={sent}, Expected={inputs.Length}, LastError={Marshal.GetLastWin32Error()}");
+        }
+
+        if (_stepDelay > TimeSpan.Zero)
+            await Task.Delay(_stepDelay, ct);
+    }
+
     private static Win32.INPUT CreateKeyInput(ushort virtualKey, bool keyUp)
     {
         return new Win32.INPUT
@@ -153,4 +196,16 @@ public sealed class InputDispatcher : IInputDispatcher
             }
         };
     }
+}
+
+internal enum TextInputKind
+{
+    UnicodeCharacter,
+    VirtualKey
+}
+
+internal readonly record struct TextInputStep(TextInputKind Kind, char Character, ushort VirtualKey)
+{
+    public static TextInputStep ForCharacter(char character) => new(TextInputKind.UnicodeCharacter, character, 0);
+    public static TextInputStep ForVirtualKey(ushort virtualKey) => new(TextInputKind.VirtualKey, '\0', virtualKey);
 }

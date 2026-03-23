@@ -140,6 +140,8 @@ public sealed class KeyboardHook : IDisposable
         bool ctrlPressed = (Win32.GetKeyState(VK_CONTROL) & 0x8000) != 0;
         bool altPressed = (Win32.GetKeyState(VK_MENU) & 0x8000) != 0;
 
+        IntPtr windowHandle = Win32.GetForegroundWindow();
+
         // Ignore Ctrl/Alt combinations (shortcuts)
         if (ctrlPressed || altPressed)
             return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
@@ -152,15 +154,14 @@ public sealed class KeyboardHook : IDisposable
         if (IsIgnoredKey(vk))
             return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
-        // Get the foreground window handle
-        IntPtr windowHandle = Win32.GetForegroundWindow();
-
         // Check for password field
         bool isPasswordField = WindowInspector.IsPasswordField(windowHandle);
 
         var keyboardEvent = ConvertToKbEvent(vk, keyboardData.scanCode, windowHandle, isPasswordField);
         if (keyboardEvent is not null)
+        {
             _bufferManager.ProcessEvent(keyboardEvent.Value);
+        }
 
         return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
     }

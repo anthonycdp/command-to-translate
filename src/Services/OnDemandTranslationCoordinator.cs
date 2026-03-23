@@ -76,10 +76,16 @@ public sealed class OnDemandTranslationCoordinator
             {
                 CaptureResult? captureResult = null;
                 ITranslationTargetAdapter? selectedAdapter = null;
+                bool triedKeystrokeBufferAdapter = false;
 
                 foreach (var candidateAdapter in candidateAdapters)
                 {
                     Logger.Info($"Attempting capture with {candidateAdapter.Name}");
+
+                    if (candidateAdapter.CanHandle(context) && candidateAdapter.UsesKeystrokeBuffer)
+                    {
+                        triedKeystrokeBufferAdapter = true;
+                    }
 
                     captureResult = await CaptureSourceAsync(candidateAdapter, ct);
                     if (captureResult != null)
@@ -89,13 +95,17 @@ public sealed class OnDemandTranslationCoordinator
                     }
 
                     Logger.Info($"Capture with {candidateAdapter.Name} returned no text");
+
+                    if (ShouldStopAdapterFallback(candidateAdapter, context))
+                        break;
                 }
 
                 if (captureResult == null || selectedAdapter == null)
                 {
-                    return new OnDemandTranslationResult(
-                        false,
-                        $"No text could be captured from the active host ({context.ProcessName}/{context.WindowClassName}).");
+                    var message = triedKeystrokeBufferAdapter
+                        ? "No text in keystroke buffer. Type the text instead of pasting, then try again."
+                        : $"No text could be captured from the active host ({context.ProcessName}/{context.WindowClassName}).";
+                    return new OnDemandTranslationResult(false, message);
                 }
 
                 Logger.Info($"On-demand translating with {selectedAdapter.Name}: '{captureResult.SourceText}'");
@@ -204,5 +214,25 @@ public sealed class OnDemandTranslationCoordinator
         var fallbackAdapters = _adapters.Where(candidate => !candidate.CanHandle(context)).ToList();
 
         return preferredAdapters.Concat(fallbackAdapters).ToList();
+    }
+
+    /// <summary>
+    /// Determines whether adapter fallback should stop to avoid sending dangerous shortcuts
+    /// (like Ctrl+C/SIGINT) to terminals after a keystroke-buffer adapter fails.
+    /// </summary>
+    private static bool ShouldStopAdapterFallback(ITranslationTargetAdapter adapter, FocusedContext context)
+    {
+        // Non-keystroke-buffer adapters can safely continue to fallback
+        if (!adapter.UsesKeystrokeBuffer)
+            return false;
+
+        // A keystroke-buffer adapter that wasn't the preferred handler for this context
+        // can be skipped - continue trying other adapters
+        if (!adapter.CanHandle(context))
+            return false;
+
+        // A preferred keystroke-buffer adapter failed (empty buffer) - stop here to avoid
+        // sending Ctrl+C to terminals which would trigger SIGINT
+        return true;
     }
 }

@@ -3,3 +3,6 @@ obj/
 .dotnet/
 .serena
 artifacts/
+
+# AI Tools
+CLAUDE.md

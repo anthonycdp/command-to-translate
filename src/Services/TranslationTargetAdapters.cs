@@ -33,11 +33,6 @@ public interface ITranslationTargetAdapter
 
 public sealed class GenericTextFieldAdapter : ITranslationTargetAdapter
 {
-    private const ushort ControlKey = 0x11;
-    private const ushort ShiftKey = 0x10;
-    private const ushort HomeKey = 0x24;
-    private const ushort CKey = 0x43;
-
     public string Name => "GenericTextField";
 
     public bool CanHandle(FocusedContext context)
@@ -50,12 +45,14 @@ public sealed class GenericTextFieldAdapter : ITranslationTargetAdapter
 
     public Task SelectSourceAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
     {
-        return inputDispatcher.SendChordAsync([ControlKey, ShiftKey, HomeKey], ct);
+        // Ctrl+A selects all text in the field regardless of cursor position,
+        // ensuring the full content is captured and later replaced.
+        return inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.A], ct);
     }
 
     public Task CopySelectionAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
     {
-        return inputDispatcher.SendChordAsync([ControlKey, CKey], ct);
+        return inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.C], ct);
     }
 
     public Task ReplaceSelectionAsync(
@@ -65,31 +62,28 @@ public sealed class GenericTextFieldAdapter : ITranslationTargetAdapter
         bool usedCursorFallback,
         CancellationToken ct)
     {
+        // The translated text is already in the clipboard (set by the coordinator
+        // before calling this method).  Paste via Ctrl+V — faster and more
+        // reliable than typing character-by-character, and fully preserves
+        // formatting (line breaks, accented characters, sentence spacing).
         if (usedCursorFallback)
-            return ReplaceCursorScopedTextAsync(inputDispatcher, translatedText, ct);
+            return SelectAllAndPasteAsync(inputDispatcher, ct);
 
-        return inputDispatcher.TypeTextAsync(translatedText, ct);
+        // Pre-existing selection is still active — paste directly over it.
+        return inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.V], ct);
     }
 
-    private static async Task ReplaceCursorScopedTextAsync(
+    private static async Task SelectAllAndPasteAsync(
         IInputDispatcher inputDispatcher,
-        string translatedText,
         CancellationToken ct)
     {
-        await inputDispatcher.SendChordAsync([ControlKey, ShiftKey, HomeKey], ct);
-        await inputDispatcher.TypeTextAsync(translatedText, ct);
+        await inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.A], ct);
+        await inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.V], ct);
     }
 }
 
 public sealed class WindowsTerminalLineAdapter : ITranslationTargetAdapter
 {
-    private const ushort ControlKey = 0x11;
-    private const ushort ShiftKey = 0x10;
-    private const ushort HomeKey = 0x24;
-    private const ushort EndKey = 0x23;
-    private const ushort CKey = 0x43;
-    private const ushort VKey = 0x56;
-
     public string Name => "WindowsTerminalLine";
 
     public bool CanHandle(FocusedContext context)
@@ -100,12 +94,12 @@ public sealed class WindowsTerminalLineAdapter : ITranslationTargetAdapter
 
     public Task SelectSourceAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
     {
-        return inputDispatcher.SendChordAsync([ShiftKey, HomeKey], ct);
+        return inputDispatcher.SendChordAsync([VirtualKeys.Shift, VirtualKeys.Home], ct);
     }
 
     public Task CopySelectionAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
     {
-        return inputDispatcher.SendChordAsync([ControlKey, ShiftKey, CKey], ct);
+        return inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.Shift, VirtualKeys.C], ct);
     }
 
     public async Task ReplaceSelectionAsync(
@@ -122,21 +116,14 @@ public sealed class WindowsTerminalLineAdapter : ITranslationTargetAdapter
         //
         // Universal approach: move cursor to end, erase the source text with
         // Backspace, then paste the translated text from the clipboard.
-        await inputDispatcher.SendKeyAsync(EndKey, ct);
+        await inputDispatcher.SendKeyAsync(VirtualKeys.End, ct);
         await inputDispatcher.SendRepeatedKeyAsync(Win32.VK_BACK, sourceText.Length, ct);
-        await inputDispatcher.SendChordAsync([ControlKey, ShiftKey, VKey], ct);
+        await inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.Shift, VirtualKeys.V], ct);
     }
 }
 
 public sealed class ClassicConsoleLineAdapter : ITranslationTargetAdapter
 {
-    private const ushort ControlKey = 0x11;
-    private const ushort ShiftKey = 0x10;
-    private const ushort HomeKey = 0x24;
-    private const ushort EndKey = 0x23;
-    private const ushort CKey = 0x43;
-    private const ushort VKey = 0x56;
-
     public string Name => "ClassicConsoleLine";
 
     public bool CanHandle(FocusedContext context)
@@ -148,12 +135,12 @@ public sealed class ClassicConsoleLineAdapter : ITranslationTargetAdapter
 
     public Task SelectSourceAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
     {
-        return inputDispatcher.SendChordAsync([ShiftKey, HomeKey], ct);
+        return inputDispatcher.SendChordAsync([VirtualKeys.Shift, VirtualKeys.Home], ct);
     }
 
     public Task CopySelectionAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
     {
-        return inputDispatcher.SendChordAsync([ControlKey, CKey], ct);
+        return inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.C], ct);
     }
 
     public async Task ReplaceSelectionAsync(
@@ -163,17 +150,14 @@ public sealed class ClassicConsoleLineAdapter : ITranslationTargetAdapter
         bool usedCursorFallback,
         CancellationToken ct)
     {
-        await inputDispatcher.SendKeyAsync(EndKey, ct);
+        await inputDispatcher.SendKeyAsync(VirtualKeys.End, ct);
         await inputDispatcher.SendRepeatedKeyAsync(Win32.VK_BACK, sourceText.Length, ct);
-        await inputDispatcher.SendChordAsync([ControlKey, VKey], ct);
+        await inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.V], ct);
     }
 }
 
 public sealed class ElectronTerminalAdapter : ITranslationTargetAdapter
 {
-    private const ushort ShiftKey = 0x10;
-    private const ushort InsertKey = 0x2D;
-
     public string Name => "ElectronTerminal";
 
     // No clipboard-based capture is possible in TUI terminals — use the
@@ -206,9 +190,23 @@ public sealed class ElectronTerminalAdapter : ITranslationTargetAdapter
         CancellationToken ct)
     {
         // Erase the typed text with Backspace, then paste the translation
-        // via Shift+Insert (universally supported, avoids SIGINT from
-        // Ctrl+C/V keybinding conflicts in TUI apps).
+        // via Ctrl+Shift+V (standard terminal paste shortcut that works in
+        // xterm.js/Electron terminals like Antigravity, Claude Code, Codex).
         await inputDispatcher.SendRepeatedKeyAsync(Win32.VK_BACK, sourceText.Length, ct);
-        await inputDispatcher.SendChordAsync([ShiftKey, InsertKey], ct);
+        await inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.Shift, VirtualKeys.V], ct);
     }
+}
+
+/// <summary>
+/// Common virtual key codes used by translation target adapters.
+/// </summary>
+internal static class VirtualKeys
+{
+    public const ushort Control = 0x11;
+    public const ushort Shift = 0x10;
+    public const ushort A = 0x41;
+    public const ushort C = 0x43;
+    public const ushort V = 0x56;
+    public const ushort Home = 0x24;
+    public const ushort End = 0x23;
 }

@@ -122,6 +122,13 @@ public static class Win32
     public const ushort VK_DELETE = 0x2E;
     public const ushort VK_RETURN = 0x0D;
     public const ushort VK_SPACE = 0x20;
+    public const ushort VK_END = 0x23;
+    public const ushort VK_HOME = 0x24;
+    public const ushort VK_LEFT = 0x25;
+    public const ushort VK_UP = 0x26;
+    public const ushort VK_RIGHT = 0x27;
+    public const ushort VK_DOWN = 0x28;
+    public const ushort VK_V = 0x56;
 
     #endregion
 

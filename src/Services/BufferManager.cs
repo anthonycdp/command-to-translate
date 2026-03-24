@@ -12,32 +12,22 @@ public sealed class BufferManager : IDisposable
 {
     private static readonly HashSet<char> WordBoundaryCharacters =
     [
-        ' ',
-        '.',
-        ',',
-        '!',
-        '?',
-        ';',
-        ':',
-        '-',
-        '/',
-        '"',
-        '\'',
-        '(',
-        ')',
-        '[',
-        ']',
-        '{',
-        '}',
-        '<',
-        '>'
+        ' ', '.', ',', '!', '?', ';', ':', '-', '/',
+        '"', '\'', '(', ')', '[', ']', '{', '}', '<', '>'
     ];
 
     private readonly object _lock = new();
     private readonly StringBuilder _currentPhrase = new();
     private readonly StringBuilder _currentWord = new();
+    private readonly Func<string?>? _clipboardReader;
 
+    private int _cursorPosition;
     private bool _disposed;
+
+    public BufferManager(Func<string?>? clipboardReader = null)
+    {
+        _clipboardReader = clipboardReader;
+    }
 
     public string CurrentPhrase
     {
@@ -85,16 +75,37 @@ public sealed class BufferManager : IDisposable
             switch (keyboardEvent.Type)
             {
                 case KbEventType.Char:
-                    AppendCharacter(keyboardEvent.Character);
+                    InsertCharacter(keyboardEvent.Character);
                     break;
                 case KbEventType.Space:
-                    AppendSpace();
+                    InsertSpace();
                     break;
                 case KbEventType.Punctuation:
-                    AppendPunctuation(keyboardEvent.Character);
+                    InsertPunctuation(keyboardEvent.Character);
                     break;
                 case KbEventType.Backspace:
-                    RemoveLastCharacter();
+                    RemoveCharacterBeforeCursor();
+                    break;
+                case KbEventType.Delete:
+                    RemoveCharacterAfterCursor();
+                    break;
+                case KbEventType.CursorLeft:
+                    MoveCursorLeft();
+                    break;
+                case KbEventType.CursorRight:
+                    MoveCursorRight();
+                    break;
+                case KbEventType.Home:
+                    MoveCursorToStart();
+                    break;
+                case KbEventType.End:
+                    MoveCursorToEnd();
+                    break;
+                case KbEventType.Paste:
+                    InsertPastedText(keyboardEvent.Text);
+                    break;
+                case KbEventType.HistoryNavigation:
+                    ResetState();
                     break;
                 case KbEventType.Enter:
                     ResetState();
@@ -103,14 +114,28 @@ public sealed class BufferManager : IDisposable
         }
     }
 
-    public (string Phrase, int CharacterCount) ConsumeCurrentPhrase()
+    public (string Phrase, int CharacterCount, int CursorPosition) ConsumeCurrentPhrase()
     {
         lock (_lock)
         {
             var phrase = _currentPhrase.ToString();
             var characterCount = _currentPhrase.Length;
+            var cursorPosition = _cursorPosition;
             ResetState();
-            return (phrase, characterCount);
+            return (phrase, characterCount, cursorPosition);
+        }
+    }
+
+    /// <summary>
+    /// Resets the buffer without returning the current content.
+    /// Called after successful translations to prevent stale buffer content
+    /// from affecting subsequent translations.
+    /// </summary>
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            ResetState();
         }
     }
 
@@ -128,39 +153,108 @@ public sealed class BufferManager : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private void AppendCharacter(char? character)
+    private void InsertCharacter(char? character)
     {
         if (character is null)
             return;
 
-        _currentPhrase.Append(character.Value);
-        _currentWord.Append(character.Value);
+        _currentPhrase.Insert(_cursorPosition, character.Value);
+        _cursorPosition++;
+        RebuildCurrentWord();
     }
 
-    private void AppendSpace()
+    private void InsertSpace()
     {
-        if (_currentPhrase.Length == 0)
+        if (_currentPhrase.Length == 0 && _cursorPosition == 0)
             return;
 
-        _currentPhrase.Append(' ');
+        _currentPhrase.Insert(_cursorPosition, ' ');
+        _cursorPosition++;
         _currentWord.Clear();
     }
 
-    private void AppendPunctuation(char? character)
+    private void InsertPunctuation(char? character)
     {
         if (character is null)
             return;
 
-        _currentPhrase.Append(character.Value);
+        _currentPhrase.Insert(_cursorPosition, character.Value);
+        _cursorPosition++;
         _currentWord.Clear();
     }
 
-    private void RemoveLastCharacter()
+    private void RemoveCharacterBeforeCursor()
     {
-        if (_currentPhrase.Length == 0)
+        if (_cursorPosition == 0)
             return;
 
-        _currentPhrase.Length--;
+        _cursorPosition--;
+        _currentPhrase.Remove(_cursorPosition, 1);
+        RebuildCurrentWord();
+    }
+
+    private void RemoveCharacterAfterCursor()
+    {
+        if (_cursorPosition >= _currentPhrase.Length)
+            return;
+
+        _currentPhrase.Remove(_cursorPosition, 1);
+        RebuildCurrentWord();
+    }
+
+    private void MoveCursorLeft()
+    {
+        if (_cursorPosition > 0)
+        {
+            _cursorPosition--;
+            RebuildCurrentWord();
+        }
+    }
+
+    private void MoveCursorRight()
+    {
+        if (_cursorPosition < _currentPhrase.Length)
+        {
+            _cursorPosition++;
+            RebuildCurrentWord();
+        }
+    }
+
+    private void MoveCursorToStart()
+    {
+        _cursorPosition = 0;
+        RebuildCurrentWord();
+    }
+
+    private void MoveCursorToEnd()
+    {
+        _cursorPosition = _currentPhrase.Length;
+        RebuildCurrentWord();
+    }
+
+    private void InsertPastedText(string? text)
+    {
+        var pastedText = text;
+
+        if (pastedText is null && _clipboardReader is not null)
+        {
+            pastedText = _clipboardReader();
+            Logger.Info($"[BufferManager] Clipboard read result: {(pastedText is null ? "null" : $"\"{pastedText}\"")}");
+        }
+
+        if (string.IsNullOrEmpty(pastedText))
+        {
+            Logger.Info("[BufferManager] Paste event received but no text to insert");
+            return;
+        }
+
+        // Strip newlines — buffer models a single input line
+        pastedText = pastedText.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+
+        Logger.Info($"[BufferManager] Inserting pasted text ({pastedText.Length} chars) at cursor position {_cursorPosition}");
+
+        _currentPhrase.Insert(_cursorPosition, pastedText);
+        _cursorPosition += pastedText.Length;
         RebuildCurrentWord();
     }
 
@@ -168,14 +262,14 @@ public sealed class BufferManager : IDisposable
     {
         _currentWord.Clear();
 
-        if (_currentPhrase.Length == 0)
+        if (_currentPhrase.Length == 0 || _cursorPosition == 0)
             return;
 
-        var lastCharacter = _currentPhrase[^1];
-        if (char.IsWhiteSpace(lastCharacter) || WordBoundaryCharacters.Contains(lastCharacter))
+        var charBeforeCursor = _currentPhrase[_cursorPosition - 1];
+        if (char.IsWhiteSpace(charBeforeCursor) || WordBoundaryCharacters.Contains(charBeforeCursor))
             return;
 
-        var startIndex = _currentPhrase.Length - 1;
+        var startIndex = _cursorPosition - 1;
         while (startIndex >= 0)
         {
             var character = _currentPhrase[startIndex];
@@ -191,12 +285,14 @@ public sealed class BufferManager : IDisposable
         if (startIndex < 0)
             startIndex = 0;
 
-        _currentWord.Append(_currentPhrase.ToString(startIndex, _currentPhrase.Length - startIndex));
+        var endIndex = _cursorPosition;
+        _currentWord.Append(_currentPhrase.ToString(startIndex, endIndex - startIndex));
     }
 
     private void ResetState()
     {
         _currentPhrase.Clear();
         _currentWord.Clear();
+        _cursorPosition = 0;
     }
 }

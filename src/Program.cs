@@ -70,7 +70,11 @@ static class Program
 
             // Keystroke buffer: captures typed text for TUI terminals where
             // clipboard-based select+copy is impossible.
-            _bufferManager = new BufferManager();
+            _bufferManager = new BufferManager(clipboardReader: () =>
+            {
+                try { return Clipboard.GetText(); }
+                catch { return null; }
+            });
             _keyboardHook = new KeyboardHook(_state, _bufferManager);
             _keyboardHook.Start();
             Logger.Info("KeyboardHook and BufferManager started");

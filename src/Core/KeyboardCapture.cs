@@ -6,11 +6,19 @@ public enum KbEventType
     Space,
     Punctuation,
     Enter,
-    Backspace
+    Backspace,
+    CursorLeft,
+    CursorRight,
+    Home,
+    End,
+    Delete,
+    Paste,
+    HistoryNavigation
 }
 
 public readonly record struct KbEvent(
     char? Character,
     KbEventType Type,
     IntPtr WindowHandle,
-    bool IsPasswordField);
+    bool IsPasswordField,
+    string? Text = null);

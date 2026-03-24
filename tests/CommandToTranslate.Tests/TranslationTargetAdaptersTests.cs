@@ -95,7 +95,7 @@ public class TranslationTargetAdaptersTests
             usedCursorFallback: true,
             CancellationToken.None);
 
-        Assert.Empty(inputDispatcher.Keys);
+        Assert.Equal(new ushort[] { 0x23 }, inputDispatcher.Keys);  // End key
         Assert.Equal([(ushort)0x08, (ushort)0x08, (ushort)0x08], inputDispatcher.RepeatedKeys);
         Assert.Empty(inputDispatcher.TypedTexts);
         Assert.Collection(

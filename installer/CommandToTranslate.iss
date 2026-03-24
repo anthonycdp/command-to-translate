@@ -201,6 +201,29 @@ begin
   if CurStep <> ssPostInstall then
     exit;
 
-  if not WizardIsTaskSelected('startup') then
-    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'command-to-translate');
+  // Step 1: Ensure Ollama is installed
+  Log('Checking Ollama installation...');
+  if not IsOllamaInstalled then
+  begin
+    Log('Ollama not found, installing...');
+    if not InstallOllama then
+    begin
+      MsgBox('Ollama installation failed. Please install Ollama manually from ollama.com',
+             mbError, MB_OK);
+      Exit;
+    end;
+  end
+  else
+  begin
+    Log('Ollama is already installed');
+  end;
+
+  // Step 2: Download and load model
+  if not DownloadAndLoadModel then
+  begin
+    Log('Model setup failed - app will show error on first translation attempt');
+  end;
+
+  // Step 3: Create startup tasks
+  CreateStartupTasks;
 end;

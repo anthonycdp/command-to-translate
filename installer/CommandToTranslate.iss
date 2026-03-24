@@ -111,6 +111,40 @@ begin
   end;
 end;
 
+function DownloadAndLoadModel: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := False;
+
+  // Pull model (download if not present)
+  Log('Downloading translategemma model...');
+  if Exec('cmd', '/c ollama pull translategemma', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    if ResultCode <> 0 then
+    begin
+      Log('Model pull failed with code: ' + IntToStr(ResultCode));
+      Exit;
+    end;
+  end
+  else
+  begin
+    Log('Failed to execute ollama pull');
+    Exit;
+  end;
+
+  // Load model to memory using echo to terminate stdin
+  Log('Preloading model into memory...');
+  if Exec('cmd', '/c echo. | ollama run translategemma --keepalive 5m', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Result := (ResultCode = 0);
+    if Result then
+      Log('Model preloaded successfully')
+    else
+      Log('Model preload failed with code: ' + IntToStr(ResultCode));
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep <> ssPostInstall then

@@ -189,6 +189,10 @@ public sealed class ElectronTerminalAdapter : ITranslationTargetAdapter
         bool usedCursorFallback,
         CancellationToken ct)
     {
+        // Move cursor to end of line first — the cursor may be in the middle
+        // after the user edited text with arrow keys.
+        await inputDispatcher.SendKeyAsync(Win32.VK_END, ct);
+
         // Erase the typed text with Backspace, then paste the translation
         // via Ctrl+Shift+V (standard terminal paste shortcut that works in
         // xterm.js/Electron terminals like Antigravity, Claude Code, Codex).

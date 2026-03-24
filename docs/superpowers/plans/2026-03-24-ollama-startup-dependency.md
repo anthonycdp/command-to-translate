@@ -279,12 +279,14 @@ git commit -m "feat(installer): integrate Ollama setup into installation sequenc
 
 - [ ] **Step 1: Remove the registry Run entry from [Registry] section**
 
-Delete line 53 (the registry entry for startup):
+Delete the registry entry from the `[Registry]` section:
 
 ```iss
 ; DELETE THIS LINE:
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "command-to-translate"; ValueData: """{app}\command-to-translate.exe"""; Flags: uninsdeletevalue; Tasks: startup
 ```
+
+The `[Registry]` section will now be empty. You can remove the entire section header if desired, or leave it empty for future use.
 
 The `[Registry]` section will now be empty. You can remove the entire section header if desired, or leave it empty for future use.
 

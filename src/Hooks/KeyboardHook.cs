@@ -142,7 +142,18 @@ public sealed class KeyboardHook : IDisposable
 
         IntPtr windowHandle = Win32.GetForegroundWindow();
 
-        // Ignore Ctrl/Alt combinations (shortcuts)
+        // Detect Ctrl+V / Ctrl+Shift+V for paste capture.
+        // Must be checked BEFORE the general Ctrl/Alt early-return.
+        if (ctrlPressed && !altPressed && vk == Win32.VK_V)
+        {
+            bool isPasswordField = WindowInspector.IsPasswordField(windowHandle);
+            // Emit Paste event with null text — BufferManager reads clipboard
+            _bufferManager.ProcessEvent(
+                new KbEvent(null, KbEventType.Paste, windowHandle, isPasswordField));
+            return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+        }
+
+        // Ignore all other Ctrl/Alt combinations (shortcuts)
         if (ctrlPressed || altPressed)
             return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
@@ -154,10 +165,7 @@ public sealed class KeyboardHook : IDisposable
         if (IsIgnoredKey(vk))
             return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
-        // Check for password field
-        bool isPasswordField = WindowInspector.IsPasswordField(windowHandle);
-
-        var keyboardEvent = ConvertToKbEvent(vk, keyboardData.scanCode, windowHandle, isPasswordField);
+        var keyboardEvent = ConvertToKbEvent(vk, keyboardData.scanCode, windowHandle, WindowInspector.IsPasswordField(windowHandle));
         if (keyboardEvent is not null)
         {
             _bufferManager.ProcessEvent(keyboardEvent.Value);
@@ -185,15 +193,15 @@ public sealed class KeyboardHook : IDisposable
         if (vk >= 0x70 && vk <= 0x87)
             return true;
 
-        // Navigation keys
-        if (vk >= 0x21 && vk <= 0x28) // Page Up, Page Down, End, Home, Left, Up, Right, Down
+        // Page Up, Page Down — still ignored
+        if (vk == 0x21 || vk == 0x22)
             return true;
 
-        // Insert, Delete
-        if (vk == 0x2D || vk == 0x2E)
+        // Insert — still ignored (Delete is now handled)
+        if (vk == 0x2D)
             return true;
 
-        // Escape, Tab (we might want Tab later, but skip for now)
+        // Escape, Tab
         if (vk == 0x1B || vk == 0x09)
             return true;
 
@@ -217,6 +225,31 @@ public sealed class KeyboardHook : IDisposable
 
             case Win32.VK_RETURN:
                 eventType = KbEventType.Enter;
+                break;
+
+            case Win32.VK_DELETE:
+                eventType = KbEventType.Delete;
+                break;
+
+            case Win32.VK_LEFT:
+                eventType = KbEventType.CursorLeft;
+                break;
+
+            case Win32.VK_RIGHT:
+                eventType = KbEventType.CursorRight;
+                break;
+
+            case Win32.VK_HOME:
+                eventType = KbEventType.Home;
+                break;
+
+            case Win32.VK_END:
+                eventType = KbEventType.End;
+                break;
+
+            case Win32.VK_UP:
+            case Win32.VK_DOWN:
+                eventType = KbEventType.HistoryNavigation;
                 break;
 
             default:

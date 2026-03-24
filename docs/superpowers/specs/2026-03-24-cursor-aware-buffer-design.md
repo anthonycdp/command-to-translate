@@ -23,7 +23,7 @@ Evolve `BufferManager` from append-only to a line-editor model with cursor posit
 
 Handles: typed characters, backspace, delete, arrow navigation, Home/End, paste (Ctrl+V, Ctrl+Shift+V).
 
-Does not handle: mouse-based cursor repositioning, readline shortcuts (Ctrl+W, Ctrl+A, Ctrl+E), terminal-specific selection. Up/Down arrows (shell history) reset the buffer since the recalled command is unknowable.
+Does not handle: mouse-based cursor repositioning, readline shortcuts (Ctrl+W, Ctrl+A, Ctrl+E), terminal-specific selection, Shift+Arrow text selection (treated as plain cursor movement). Up/Down arrows (shell history) reset the buffer since the recalled command is unknowable.
 
 Estimated coverage of real editing scenarios: ~90%.
 
@@ -74,13 +74,13 @@ Initialized to 0, reset alongside `_currentPhrase` in `ResetState()`.
 | Delete | (ignored) | Remove at `_cursorPosition` (forward delete) |
 | CursorLeft / CursorRight | (ignored) | `_cursorPosition ± 1`, clamped to `[0, Length]` |
 | Home / End | (ignored) | `_cursorPosition = 0` / `_cursorPosition = Length` |
-| Paste | (ignored) | `Insert(text)` at `_cursorPosition`, advance by `text.Length` |
+| Paste | (ignored) | `Insert(text)` at `_cursorPosition`, advance by `text.Length`. Newlines in pasted text are stripped (replaced with space) since the buffer models a single input line; newlines would break the backspace-count erasure logic. |
 | HistoryNavigation (Up/Down) | (ignored) | `ResetState()` — buffer is invalidated |
-| Enter | `ResetState()` | No change |
+| Enter | `ResetState()` | `ResetState()` — no change from current behavior |
 
 #### `_currentWord` tracking
 
-`RebuildCurrentWord()` scans backward from `_cursorPosition` (not from the end of `_currentPhrase`) to find the current word boundary.
+`RebuildCurrentWord()` scans backward from `_cursorPosition - 1` (the character immediately left of the cursor, since the cursor sits *between* characters) to find the current word boundary. The existing check for `_currentPhrase[^1]` becomes `_currentPhrase[_cursorPosition - 1]`.
 
 #### `ConsumeCurrentPhrase` signature change
 
@@ -90,15 +90,37 @@ public (string Phrase, int CharacterCount, int CursorPosition) ConsumeCurrentPhr
 
 Returns the cursor position so the adapter can decide how to erase the source text.
 
+`CursorPosition` stays internal to the coordinator — it is **not** passed through `ITranslationTargetAdapter`. The coordinator passes `sourceText` (the full phrase) to the adapter, which already handles erasure. The adapter sends End + Backspace×Length, so cursor position is implicitly handled.
+
+#### Migration: call-site updates for new return type
+
+All call sites that destructure the two-element tuple must add a third element or discard:
+
+| Call site | File | Required change |
+|---|---|---|
+| `CaptureSourceAsync` | `OnDemandTranslationCoordinator.cs` | Destructure: `var (phrase, charCount, _) = ...` |
+| `ConsumeCurrentPhrase` tests | `BufferManagerTests.cs` | Destructure: `var (phrase, characterCount, _) = ...` (or assert cursor position in new tests) |
+| Coordinator tests | `OnDemandTranslationCoordinatorTests.cs` | Update any mock/fake that returns `ConsumeCurrentPhrase` results |
+
 ### 3. KeyboardHook Changes (KeyboardHook.cs)
 
 #### `IsIgnoredKey`
 
-Remove from the ignored set:
-- Left (`0x25`), Right (`0x27`) — cursor movement
-- Home (`0x24`), End (`0x23`) — cursor jump
-- Up (`0x26`), Down (`0x28`) — history navigation (generates `HistoryNavigation`)
-- Delete (`0x2E`) — forward delete
+The current code uses a single range `vk >= 0x21 && vk <= 0x28` that covers both Page Up/Down (keep ignoring) and navigation keys (stop ignoring). This range must be split:
+
+```csharp
+// Before: if (vk >= 0x21 && vk <= 0x28) return true;
+// After:
+if (vk == 0x21 || vk == 0x22) return true;  // Page Up, Page Down — still ignored
+
+// Before: if (vk == 0x2D || vk == 0x2E) return true;
+// After:
+if (vk == 0x2D) return true;                 // Insert — still ignored
+```
+
+Keys removed from the ignored set (now generate events):
+- End (`0x23`), Home (`0x24`), Left (`0x25`), Up (`0x26`), Right (`0x27`), Down (`0x28`)
+- Delete (`0x2E`)
 
 Still ignored: Page Up (`0x21`), Page Down (`0x22`), Insert (`0x2D`), Escape (`0x1B`), Tab (`0x09`).
 
@@ -108,10 +130,13 @@ Before the `ctrlPressed || altPressed` early-return, add a check:
 
 ```
 if ctrlPressed and vk == 0x56 (V) and not altPressed:
-    read clipboard text via Clipboard.GetText() (safe — hook thread is STA)
-    emit KbEvent(type: Paste, text: clipboardContent)
+    emit KbEvent(type: Paste, text: null)
     skip the early-return
 ```
+
+**Important:** The clipboard must NOT be read inside the hook callback. The low-level keyboard hook has a strict OS timeout (~300ms); clipboard access can block if another application holds the lock (which is common during a paste operation — the very moment this code fires). If the callback exceeds the timeout, Windows silently uninstalls the hook.
+
+Instead, `BufferManager.ProcessEvent` reads the clipboard when it receives a `Paste` event. `BufferManager` gains a constructor dependency on a clipboard reader (a `Func<string?>` delegate or `IClipboardService`). The clipboard read happens outside the hook callback's time constraint, on the caller's thread (which is the STA hook thread's message loop — `Clipboard.GetText()` works there since the hook thread is STA and runs a message pump).
 
 This handles both Ctrl+V and Ctrl+Shift+V (shift state is irrelevant for this detection).
 
@@ -142,11 +167,13 @@ Step 1 is the only addition — it ensures backspacing erases the correct number
 | File | Change |
 |---|---|
 | `src/Core/KeyboardCapture.cs` | Add enum values, add `Text` field to `KbEvent` |
-| `src/Services/BufferManager.cs` | Add `_cursorPosition`, rewrite all operations to cursor-aware semantics |
-| `src/Hooks/KeyboardHook.cs` | Update `IsIgnoredKey`, add paste detection, extend `ConvertToKbEvent` |
+| `src/Services/BufferManager.cs` | Add `_cursorPosition`, clipboard reader dependency, rewrite all operations to cursor-aware semantics |
+| `src/Hooks/KeyboardHook.cs` | Update `IsIgnoredKey` (split range), add paste detection, extend `ConvertToKbEvent` |
 | `src/Services/TranslationTargetAdapters.cs` | Add End key before backspace sequence in `ElectronTerminalAdapter` |
 | `src/Services/OnDemandTranslationCoordinator.cs` | Adapt `ConsumeCurrentPhrase` destructuring |
-| `tests/CommandToTranslate.Tests/BufferManagerTests.cs` | New tests for cursor operations, paste, history reset |
+| `src/Program.cs` | Pass clipboard reader to `BufferManager` constructor |
+| `tests/CommandToTranslate.Tests/BufferManagerTests.cs` | New tests for cursor operations, paste, history reset; update existing tuple destructuring |
+| `tests/CommandToTranslate.Tests/OnDemandTranslationCoordinatorTests.cs` | Update mock/fake for new `ConsumeCurrentPhrase` return type |
 
 ## Testing Strategy
 

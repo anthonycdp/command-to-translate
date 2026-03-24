@@ -42,6 +42,7 @@ Shift from reactive (wait for errors) to proactive (ensure dependencies ready):
 3. Scheduled task preloads model at every logon
 4. Application starts 30 seconds after logon
 5. Graceful error handling if Ollama installation fails
+6. User can opt-out of automatic startup
 
 ## Implementation
 
@@ -49,7 +50,7 @@ Shift from reactive (wait for errors) to proactive (ensure dependencies ready):
 
 #### 1. Add Ollama installation step
 
-Create a Pascal function to check and install Ollama:
+Create a Pascal function to check and install Ollama. Uses PowerShell for downloading (no external dependencies):
 
 ```iss
 [Code]
@@ -60,8 +61,11 @@ function IsOllamaInstalled: Boolean;
 var
   ResultCode: Integer;
 begin
-  Result := Exec('cmd', '/c ollama --version', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := (ResultCode = 0);
+  // Exec returns True if execution succeeded; ResultCode is output parameter
+  if Exec('cmd', '/c ollama --version', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := (ResultCode = 0)
+  else
+    Result := False;
 end;
 
 function InstallOllama: Boolean;
@@ -70,44 +74,83 @@ var
   ResultCode: Integer;
 begin
   InstallerPath := ExpandConstant('{tmp}\OllamaSetup.exe');
+  Result := False;
 
-  // Download Ollama installer
-  if not idpDownloadFile(OLLAMA_INSTALLER_URL, InstallerPath) then
+  // Download Ollama installer using PowerShell (no external dependencies)
+  if Exec('powershell',
+          '-NoProfile -Command "Invoke-WebRequest -Uri ''' + OLLAMA_INSTALLER_URL + ''' -OutFile ''' + InstallerPath + '''"',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    Log('Failed to download Ollama installer');
-    Result := False;
+    if ResultCode <> 0 then
+    begin
+      Log('Failed to download Ollama installer: PowerShell returned ' + IntToStr(ResultCode));
+      Exit;
+    end;
+  end
+  else
+  begin
+    Log('Failed to execute PowerShell for download');
     Exit;
   end;
 
-  // Run installer silently
-  Result := Exec(InstallerPath, '/S', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := (ResultCode = 0);
-
-  if Result then
-    Log('Ollama installed successfully')
+  // Run Ollama installer silently
+  if Exec(InstallerPath, '/S', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Result := (ResultCode = 0);
+    if Result then
+      Log('Ollama installed successfully')
+    else
+      Log('Ollama installation failed with code: ' + IntToStr(ResultCode));
+  end
   else
-    Log('Ollama installation failed with code: ' + IntToStr(ResultCode));
+  begin
+    Log('Failed to execute Ollama installer');
+  end;
 end;
 ```
 
 #### 2. Add model download and preload step
 
 ```iss
-procedure DownloadAndLoadModel;
+function DownloadAndLoadModel: Boolean;
 var
   ResultCode: Integer;
 begin
-  // Pull model (download if not present)
-  Exec('cmd', '/c ollama pull translategemma', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := False;
 
-  // Load model to memory (warms up for first use)
-  Exec('cmd', '/c ollama run translategemma --keepalive 5m ""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Pull model (download if not present)
+  Log('Downloading translategemma model...');
+  if Exec('cmd', '/c ollama pull translategemma', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    if ResultCode <> 0 then
+    begin
+      Log('Model pull failed with code: ' + IntToStr(ResultCode));
+      Exit;
+    end;
+  end
+  else
+  begin
+    Log('Failed to execute ollama pull');
+    Exit;
+  end;
+
+  // Load model to memory using echo to terminate stdin
+  // This warms up the model for first use while keeping it loaded for 5 minutes
+  Log('Preloading model into memory...');
+  if Exec('cmd', '/c echo. | ollama run translategemma --keepalive 5m', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Result := (ResultCode = 0);
+    if Result then
+      Log('Model preloaded successfully')
+    else
+      Log('Model preload failed with code: ' + IntToStr(ResultCode));
+  end;
 end;
 ```
 
 #### 3. Create scheduled tasks for startup
 
-Replace the registry Run entry with scheduled tasks:
+Replace the registry Run entry with scheduled tasks. Respects user's choice for startup:
 
 ```iss
 procedure CreateStartupTasks;
@@ -118,22 +161,43 @@ begin
   AppPath := ExpandConstant('{app}\command-to-translate.exe');
 
   // Task 1: Load model at logon (immediate)
-  Exec('schtasks', '/Create /TN "LoadTranslateGemma" /TR "ollama run translategemma" /SC ON_LOGON /RL HIGHEST /F',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Uses cmd wrapper for proper command execution
+  if Exec('schtasks',
+          '/Create /TN "LoadTranslateGemma" /TR "cmd /c echo. | ollama run translategemma --keepalive 5m" /SC ON_LOGON /RL HIGHEST /F',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    if ResultCode = 0 then
+      Log('LoadTranslateGemma task created successfully')
+    else
+      Log('Failed to create LoadTranslateGemma task: ' + IntToStr(ResultCode));
+  end;
 
   // Task 2: Start app at logon (30 second delay)
-  Exec('schtasks', '/Create /TN "StartCommandToTranslate" /TR "' + AppPath + '" /SC ON_LOGON /DELAY 0000:00:30 /F',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Only create if user selected startup option
+  if WizardIsTaskSelected('startup') then
+  begin
+    if Exec('schtasks',
+            '/Create /TN "StartCommandToTranslate" /TR "' + AppPath + '" /SC ON_LOGON /DELAY 00:00:30 /F',
+            '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    begin
+      if ResultCode = 0 then
+        Log('StartCommandToTranslate task created successfully')
+      else
+        Log('Failed to create StartCommandToTranslate task: ' + IntToStr(ResultCode));
+    end;
+  end;
 
-  // Remove old registry startup entry if exists
+  // Remove old registry startup entry if exists (migration from older versions)
   RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'CommandToTranslate');
 end;
 ```
 
 #### 4. Hook into installation sequence
 
+**Important**: `CurStepChanged` is a **procedure**, not a function:
+
 ```iss
-function CurStepChanged(CurStep: TSetupStep): Boolean;
+procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
@@ -149,7 +213,10 @@ begin
     end;
 
     // Step 2: Download and load model
-    DownloadAndLoadModel;
+    if not DownloadAndLoadModel then
+    begin
+      Log('Model setup failed - app will show error on first translation attempt');
+    end;
 
     // Step 3: Create startup tasks
     CreateStartupTasks;
@@ -159,11 +226,12 @@ end;
 
 #### 5. Update [Tasks] section
 
-Remove the old `startup` task since we now use scheduled tasks:
+Keep the `startup` task for user choice (checked by default):
 
 ```iss
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+Name: "startup"; Description: "Start with Windows"; GroupDescription: "Additional options:"; Flags: checkedonce
 Name: "launchapp"; Description: "Launch command-to-translate"; GroupDescription: "Post-install:"; Flags: checkedonce
 ```
 
@@ -180,28 +248,22 @@ Filename: "schtasks"; Parameters: "/Delete /TN ""StartCommandToTranslate"" /F"; 
 Type: filesandordirs; Name: "{app}"
 ```
 
-### File: `installer/CommandToTranslate.iss` - Include IDP
-
-Add at the top of the file to enable file downloading:
-
-```iss
-#include <idp.iss>
-```
-
 ## Error Handling
 
 | Scenario | Behavior |
 |----------|----------|
-| Ollama not installed | Download and install automatically. If download fails, show error with manual install link. |
-| Model download fails | Continue installation. App will show error on first translation attempt. |
+| Ollama not installed | Download via PowerShell and install silently. If download fails, show error with manual install link. |
+| Model download fails | Log error, continue installation. App will show error on first translation attempt. |
 | Scheduled task creation fails | Log error. User can manually create task or run app normally. |
 | Ollama service slow to start | 30s app delay provides buffer. Health check catches edge cases. |
+| User unchecks "Start with Windows" | Only LoadTranslateGemma task is created (model preload). App task is skipped. |
 
 ## Trade-offs
 
 - **30-second fixed delay**: Simpler than dynamic detection, but may be insufficient on very slow machines. Users can manually adjust the scheduled task delay if needed.
-- **Ollama auto-install**: Requires internet connection during installation. Alternative is to prompt user to install manually.
+- **PowerShell for download**: Adds dependency on PowerShell (available on Windows 7+), but avoids bundling third-party Inno Setup plugins.
 - **Task Scheduler instead of registry Run**: Slightly more complex, but provides delay capability and better control over startup order.
+- **echo. | for stdin termination**: Works reliably to terminate interactive session while keeping model loaded.
 
 ## Files Changed
 

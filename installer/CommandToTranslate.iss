@@ -56,6 +56,19 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\command-to-translate.exe"; Description: "Launch command-to-translate"; Flags: nowait postinstall skipifsilent; Tasks: launchapp
 
 [Code]
+const
+  OLLAMA_INSTALLER_URL = 'https://ollama.com/download/OllamaSetup.exe';
+
+function IsOllamaInstalled: Boolean;
+var
+  ResultCode: Integer;
+begin
+  if Exec('cmd', '/c ollama --version', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := (ResultCode = 0)
+  else
+    Result := False;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep <> ssPostInstall then

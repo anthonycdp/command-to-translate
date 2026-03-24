@@ -69,6 +69,48 @@ begin
     Result := False;
 end;
 
+function InstallOllama: Boolean;
+var
+  InstallerPath: string;
+  ResultCode: Integer;
+begin
+  InstallerPath := ExpandConstant('{tmp}\OllamaSetup.exe');
+  Result := False;
+
+  // Download Ollama installer using PowerShell
+  Log('Downloading Ollama installer...');
+  if Exec('powershell',
+          '-NoProfile -Command "Invoke-WebRequest -Uri ''' + OLLAMA_INSTALLER_URL + ''' -OutFile ''' + InstallerPath + '''"',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    if ResultCode <> 0 then
+    begin
+      Log('Failed to download Ollama installer: PowerShell returned ' + IntToStr(ResultCode));
+      Exit;
+    end;
+  end
+  else
+  begin
+    Log('Failed to execute PowerShell for download');
+    Exit;
+  end;
+
+  // Run Ollama installer silently
+  Log('Running Ollama installer...');
+  if Exec(InstallerPath, '/S', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Result := (ResultCode = 0);
+    if Result then
+      Log('Ollama installed successfully')
+    else
+      Log('Ollama installation failed with code: ' + IntToStr(ResultCode));
+  end
+  else
+  begin
+    Log('Failed to execute Ollama installer');
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep <> ssPostInstall then

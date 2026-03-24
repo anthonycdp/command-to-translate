@@ -208,6 +208,61 @@ public class BufferManagerTests
         Assert.Equal(3, cursorPosition);
     }
 
+    [Fact]
+    public void ProcessEvent_PasteInsertsTextAtCursor()
+    {
+        using var buffer = new BufferManager();
+
+        Type(buffer, "hello ");
+        buffer.ProcessEvent(new KbEvent(null, KbEventType.Paste, IntPtr.Zero, false, "world"));
+
+        Assert.Equal("hello world", buffer.CurrentPhrase);
+        Assert.Equal(11, buffer.BufferedCharacterCount);
+    }
+
+    [Fact]
+    public void ProcessEvent_PasteInsertsAtMiddle()
+    {
+        using var buffer = new BufferManager();
+
+        Type(buffer, "hd");
+        buffer.ProcessEvent(new KbEvent(null, KbEventType.CursorLeft, IntPtr.Zero, false));
+        buffer.ProcessEvent(new KbEvent(null, KbEventType.Paste, IntPtr.Zero, false, "ello worl"));
+
+        Assert.Equal("hello world", buffer.CurrentPhrase);
+    }
+
+    [Fact]
+    public void ProcessEvent_PasteStripsNewlines()
+    {
+        using var buffer = new BufferManager();
+
+        buffer.ProcessEvent(new KbEvent(null, KbEventType.Paste, IntPtr.Zero, false, "line1\nline2\r\nline3"));
+
+        Assert.Equal("line1 line2 line3", buffer.CurrentPhrase);
+    }
+
+    [Fact]
+    public void ProcessEvent_PasteReadsClipboardWhenTextIsNull()
+    {
+        using var buffer = new BufferManager(clipboardReader: () => "from clipboard");
+
+        buffer.ProcessEvent(new KbEvent(null, KbEventType.Paste, IntPtr.Zero, false));
+
+        Assert.Equal("from clipboard", buffer.CurrentPhrase);
+    }
+
+    [Fact]
+    public void ProcessEvent_PasteIgnoresEmptyClipboard()
+    {
+        using var buffer = new BufferManager(clipboardReader: () => null);
+
+        Type(buffer, "existing");
+        buffer.ProcessEvent(new KbEvent(null, KbEventType.Paste, IntPtr.Zero, false));
+
+        Assert.Equal("existing", buffer.CurrentPhrase);
+    }
+
     private static void Type(BufferManager buffer, string text, IntPtr? windowHandle = null)
     {
         foreach (var character in text)

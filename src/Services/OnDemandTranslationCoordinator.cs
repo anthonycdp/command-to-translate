@@ -129,6 +129,11 @@ public sealed class OnDemandTranslationCoordinator
                 // command and read the clipboard before restoring it.
                 await Task.Delay(200, ct);
 
+                // Reset keystroke buffer after ANY successful translation,
+                // not just keystroke-buffer adapters. This prevents stale
+                // buffer content from affecting subsequent translations.
+                _bufferManager?.Reset();
+
                 Logger.Info($"On-demand translation completed with {selectedAdapter.Name}");
                 return new OnDemandTranslationResult(true, "Translation completed.");
             }

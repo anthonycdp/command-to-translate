@@ -126,6 +126,19 @@ public sealed class BufferManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Resets the buffer without returning the current content.
+    /// Called after successful translations to prevent stale buffer content
+    /// from affecting subsequent translations.
+    /// </summary>
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            ResetState();
+        }
+    }
+
     public void Dispose()
     {
         lock (_lock)
@@ -224,13 +237,21 @@ public sealed class BufferManager : IDisposable
         var pastedText = text;
 
         if (pastedText is null && _clipboardReader is not null)
+        {
             pastedText = _clipboardReader();
+            Logger.Info($"[BufferManager] Clipboard read result: {(pastedText is null ? "null" : $"\"{pastedText}\"")}");
+        }
 
         if (string.IsNullOrEmpty(pastedText))
+        {
+            Logger.Info("[BufferManager] Paste event received but no text to insert");
             return;
+        }
 
         // Strip newlines — buffer models a single input line
         pastedText = pastedText.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+
+        Logger.Info($"[BufferManager] Inserting pasted text ({pastedText.Length} chars) at cursor position {_cursorPosition}");
 
         _currentPhrase.Insert(_cursorPosition, pastedText);
         _cursorPosition += pastedText.Length;

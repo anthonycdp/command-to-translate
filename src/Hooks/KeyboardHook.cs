@@ -147,6 +147,7 @@ public sealed class KeyboardHook : IDisposable
         if (ctrlPressed && !altPressed && vk == Win32.VK_V)
         {
             bool isPasswordField = WindowInspector.IsPasswordField(windowHandle);
+            Logger.Info("[KeyboardHook] Ctrl+V detected, emitting Paste event");
             // Emit Paste event with null text — BufferManager reads clipboard
             _bufferManager.ProcessEvent(
                 new KbEvent(null, KbEventType.Paste, windowHandle, isPasswordField));

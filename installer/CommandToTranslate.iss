@@ -149,6 +149,53 @@ begin
   end;
 end;
 
+procedure CreateStartupTasks;
+var
+  AppPath: string;
+  ResultCode: Integer;
+begin
+  AppPath := ExpandConstant('{app}\command-to-translate.exe');
+
+  // Task 1: Load model at logon (immediate)
+  Log('Creating LoadTranslateGemma scheduled task...');
+  if Exec('schtasks',
+          '/Create /TN "LoadTranslateGemma" /TR "cmd /c echo. | ollama run translategemma --keepalive 5m" /SC ON_LOGON /RL HIGHEST /F',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    if ResultCode = 0 then
+      Log('LoadTranslateGemma task created successfully')
+    else
+      Log('Failed to create LoadTranslateGemma task: ' + IntToStr(ResultCode));
+  end
+  else
+  begin
+    Log('Failed to execute schtasks for LoadTranslateGemma');
+  end;
+
+  // Task 2: Start app at logon (30 second delay)
+  // Only create if user selected startup option
+  if WizardIsTaskSelected('startup') then
+  begin
+    Log('Creating StartCommandToTranslate scheduled task...');
+    if Exec('schtasks',
+            '/Create /TN "StartCommandToTranslate" /TR "' + AppPath + '" /SC ON_LOGON /DELAY 00:00:30 /F',
+            '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    begin
+      if ResultCode = 0 then
+        Log('StartCommandToTranslate task created successfully')
+      else
+        Log('Failed to create StartCommandToTranslate task: ' + IntToStr(ResultCode));
+    end
+    else
+    begin
+      Log('Failed to execute schtasks for StartCommandToTranslate');
+    end;
+  end;
+
+  // Remove old registry startup entry if exists (migration from older versions)
+  RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'CommandToTranslate');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep <> ssPostInstall then

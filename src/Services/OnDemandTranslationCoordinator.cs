@@ -171,7 +171,7 @@ public sealed class OnDemandTranslationCoordinator
                 return null;
             }
 
-            var (phrase, charCount) = _bufferManager.ConsumeCurrentPhrase();
+            var (phrase, charCount, _) = _bufferManager.ConsumeCurrentPhrase();
             if (string.IsNullOrWhiteSpace(phrase) || charCount <= 0)
             {
                 Logger.Info("Keystroke buffer is empty — nothing to translate");

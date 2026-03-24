@@ -142,6 +142,10 @@ begin
       Log('Model preloaded successfully')
     else
       Log('Model preload failed with code: ' + IntToStr(ResultCode));
+  end
+  else
+  begin
+    Log('Failed to execute ollama run');
   end;
 end;
 

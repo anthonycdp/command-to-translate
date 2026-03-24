@@ -17,17 +17,37 @@ Supported hosts:
 
 - Windows 10 or 11
 - .NET SDK 9.0+ for development
-- Ollama running locally
-- a translation model installed in Ollama
+- Ollama running locally (installed automatically by the installer)
+- a translation model installed in Ollama (downloaded automatically by the installer)
 
 Default settings:
 
 - Endpoint: `http://127.0.0.1:11434`
 - Model: `translategemma`
 
-## Run
+## Installation
 
-Start Ollama if needed:
+The Windows installer handles all dependencies automatically:
+
+1. **Ollama installation** — If Ollama is not installed, the installer downloads and installs it silently.
+2. **Model download** — The `translategemma` model is downloaded during installation.
+3. **Startup configuration** — Two scheduled tasks are created:
+   - `LoadTranslateGemma` — Preloads the model at Windows logon (immediate)
+   - `StartCommandToTranslate` — Starts the app with a 30-second delay, ensuring the model is ready
+
+This startup orchestration eliminates race conditions where the app would start before the model is loaded in memory.
+
+To build the installer:
+
+```powershell
+.\scripts\Build-Installer.ps1
+```
+
+This requires the Inno Setup compiler (`iscc.exe`) to be installed and available in `PATH`.
+
+## Run (Development)
+
+For development, start Ollama manually if needed:
 
 ```powershell
 ollama serve
@@ -55,20 +75,6 @@ Published output:
 
 ```text
 artifacts\publish\win-x64\
-```
-
-Build the Windows installer locally:
-
-```powershell
-.\scripts\Build-Installer.ps1
-```
-
-This requires the Inno Setup compiler (`iscc.exe`) to be installed and available in `PATH`.
-
-Installer output:
-
-```text
-artifacts\installer\
 ```
 
 ## Configuration
@@ -135,14 +141,18 @@ The selected source/target pair is also used to build the prompt sent to Ollama,
 
 ## Usage
 
-1. Start the app.
+1. Start the app (or let it start automatically with Windows).
 2. Open `Select translation languages...` in the tray menu if needed.
 3. Open `Change hotkey...` in the tray menu if you want a different shortcut.
 4. Type or select text in a supported host.
 5. Press your configured hotkey.
 6. Wait for the text to be replaced with the translation.
 
-When installed through the Windows installer, the app can also start automatically with Windows. The tray menu includes `Start with Windows` so users can change that setting later.
+When installed through the Windows installer:
+
+- The app starts automatically with Windows via a scheduled task (not registry Run)
+- A 30-second delay ensures the translation model is preloaded before the app starts
+- The tray menu includes `Start with Windows` to toggle auto-start
 
 Tray menu:
 

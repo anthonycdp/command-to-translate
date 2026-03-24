@@ -29,9 +29,16 @@ SolidCompression=yes
 UninstallDisplayIcon={app}\command-to-translate.exe
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "english";           MessagesFile: "compiler:Default.isl"
+Name: "brazilian";         MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+Name: "spanish";           MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "french";            MessagesFile: "compiler:Languages\French.isl"
+Name: "german";            MessagesFile: "compiler:Languages\German.isl"
+Name: "japanese";          MessagesFile: "compiler:Languages\Japanese.isl"
+Name: "italian";           MessagesFile: "compiler:Languages\Italian.isl"
 
 [Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 Name: "startup"; Description: "Start with Windows"; GroupDescription: "Additional options:"; Flags: checkedonce
 Name: "launchapp"; Description: "Launch command-to-translate"; GroupDescription: "Post-install:"; Flags: checkedonce
 
@@ -40,6 +47,7 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{autoprograms}\command-to-translate"; Filename: "{app}\command-to-translate.exe"
+Name: "{autodesktop}\command-to-translate"; Filename: "{app}\command-to-translate.exe"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "command-to-translate"; ValueData: """{app}\command-to-translate.exe"""; Flags: uninsdeletevalue; Tasks: startup

@@ -224,3 +224,12 @@ begin
   // Step 3: Create startup tasks
   CreateStartupTasks;
 end;
+
+[UninstallRun]
+; Remove scheduled tasks on uninstall
+Filename: "schtasks"; Parameters: "/Delete /TN ""LoadTranslateGemma"" /F"; Flags: runhidden
+Filename: "schtasks"; Parameters: "/Delete /TN ""StartCommandToTranslate"" /F"; Flags: runhidden
+
+[UninstallDelete]
+; Clean up any leftover files
+Type: filesandordirs; Name: "{app}"

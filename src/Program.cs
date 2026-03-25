@@ -11,7 +11,9 @@ namespace CommandToTranslate;
 /// </summary>
 static class Program
 {
+    private const string SingleInstanceMutexName = @"Global\CommandToTranslate.SingleInstance";
     private static readonly CancellationTokenSource AppCancellation = new();
+    private static Mutex? _singleInstanceMutex;
     private static AppState? _state;
     private static TranslationService? _translationService;
     private static OnDemandTranslationCoordinator? _translationCoordinator;
@@ -27,6 +29,9 @@ static class Program
     {
         // Initialize logger first
         Logger.LogStartup();
+
+        if (!TryAcquireSingleInstance())
+            return;
 
         // Set up global exception handlers
         Application.ThreadException += (s, e) =>
@@ -385,7 +390,35 @@ static class Program
         _hotkeyManager?.Dispose();
         _trayIcon?.Dispose();
         _translationService?.Dispose();
+        _singleInstanceMutex?.ReleaseMutex();
+        _singleInstanceMutex?.Dispose();
+        _singleInstanceMutex = null;
         AppCancellation.Dispose();
+    }
+
+    private static bool TryAcquireSingleInstance()
+    {
+        try
+        {
+            _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+            if (createdNew)
+                return true;
+
+            Logger.Warning("Another instance is already running. Startup aborted.");
+            MessageBox.Show(
+                "command-to-translate is already running.",
+                "command-to-translate",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            return false;
+        }
+        catch (AbandonedMutexException)
+        {
+            Logger.Warning("Recovered abandoned single-instance mutex.");
+            return true;
+        }
     }
 }
 

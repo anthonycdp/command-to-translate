@@ -18,6 +18,25 @@ internal static class WindowInspector
         return length > 0 ? className.ToString(0, length) : string.Empty;
     }
 
+    public static IntPtr GetFocusedWindowHandle(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+            return IntPtr.Zero;
+
+        var threadId = Win32.GetWindowThreadProcessId(windowHandle, out _);
+        if (threadId == 0)
+            return IntPtr.Zero;
+
+        var guiThreadInfo = new Win32.GUITHREADINFO
+        {
+            cbSize = (uint)Marshal.SizeOf<Win32.GUITHREADINFO>()
+        };
+
+        return Win32.GetGUIThreadInfo(threadId, ref guiThreadInfo)
+            ? guiThreadInfo.hwndFocus
+            : IntPtr.Zero;
+    }
+
     public static bool IsPasswordField(IntPtr windowHandle)
     {
         if (windowHandle == IntPtr.Zero)

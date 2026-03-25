@@ -88,7 +88,7 @@ public class OllamaConfig
 {
     public string Endpoint { get; set; } = "http://127.0.0.1:11434";
     public string Model { get; set; } = "translategemma";
-    public int TimeoutMs { get; set; } = 10000;
+    public int TimeoutMs { get; set; } = 30000;
     public double Temperature { get; set; } = 0.0;
     public bool Stream { get; set; } = false;
     public string KeepAlive { get; set; } = "5m";

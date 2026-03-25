@@ -7,6 +7,41 @@ namespace CommandToTranslate.Tests;
 public class TranslationServiceTests
 {
     [Fact]
+    public async Task TranslateAsync_TimeoutDoesNotMarkOllamaUnavailable()
+    {
+        var state = new AppState
+        {
+            Config = new AppConfig
+            {
+                Ollama = new OllamaConfig
+                {
+                    TimeoutMs = 30000
+                }
+            }
+        };
+
+        using var service = new TranslationService(
+            state,
+            new HttpClient(new TimeoutMessageHandler())
+            {
+                Timeout = TimeSpan.FromMilliseconds(25)
+            });
+
+        var translated = await service.TranslateAsync("ola", CancellationToken.None);
+
+        Assert.Null(translated);
+        Assert.True(state.OllamaAvailable);
+    }
+
+    [Fact]
+    public void TranslationService_DefaultTimeoutIsThirtySeconds()
+    {
+        var config = new OllamaConfig();
+
+        Assert.Equal(30000, config.TimeoutMs);
+    }
+
+    [Fact]
     public void CreateChatRequest_UsesActiveTranslationPairInSystemPrompt()
     {
         var request = TranslationService.CreateChatRequest(
@@ -85,5 +120,15 @@ public class TranslationServiceTests
         var finalizedText = TranslationService.FinalizeTranslatedText(sourceText, translatedText);
 
         Assert.Equal("Visite example.com hoje.", finalizedText);
+    }
+
+    private sealed class TimeoutMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromException<HttpResponseMessage>(new TaskCanceledException("Simulated timeout"));
+        }
     }
 }

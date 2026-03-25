@@ -103,6 +103,36 @@ public class TranslationTargetAdaptersTests
             chord => Assert.Equal(new ushort[] { 0x11, 0x10, 0x56 }, chord));  // Ctrl+Shift+V
     }
 
+    [Fact]
+    public void ElectronTerminal_CanHandle_OnlyKnownTerminalProcesses()
+    {
+        var adapter = new ElectronTerminalAdapter();
+
+        Assert.True(adapter.CanHandle(CreateContext("claude", "Chrome_WidgetWin_1")));
+        Assert.False(adapter.CanHandle(CreateContext("chrome", "Chrome_WidgetWin_1")));
+        Assert.False(adapter.CanHandle(CreateContext("Code", "Chrome_WidgetWin_1")));
+    }
+
+    [Fact]
+    public void GenericTextField_DisablesCursorFallback_ForChromiumHosts()
+    {
+        var adapter = new GenericTextFieldAdapter();
+
+        Assert.False(adapter.SupportsCursorFallback(CreateContext("chrome", "Chrome_WidgetWin_1")));
+        Assert.True(adapter.SupportsCursorFallback(CreateContext("notepad", "Notepad")));
+    }
+
+    private static FocusedContext CreateContext(string processName, string windowClassName)
+    {
+        return new FocusedContext(
+            (IntPtr)42,
+            (IntPtr)43,
+            processName,
+            windowClassName,
+            string.Empty,
+            false);
+    }
+
     private sealed class RecordingInputDispatcher : IInputDispatcher
     {
         public List<ushort> Keys { get; } = [];

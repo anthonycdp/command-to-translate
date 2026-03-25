@@ -35,16 +35,19 @@ public class TranslationService : IDisposable, ITextTranslator
     private readonly TimeSpan _notificationCooldown = TimeSpan.FromSeconds(30);
 
     public TranslationService(AppState state)
+        : this(state, httpClient: null)
+    {
+    }
+
+    internal TranslationService(AppState state, HttpClient? httpClient)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _endpoint = NormalizeEndpoint(_state.Config.Ollama.Endpoint);
         _keepAlive = _state.Config.Ollama.KeepAlive;
         var timeoutMs = Math.Max(_state.Config.Ollama.TimeoutMs, MinimumRecommendedTimeoutMs);
 
-        _httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromMilliseconds(timeoutMs)
-        };
+        _httpClient = httpClient ?? new HttpClient();
+        _httpClient.Timeout = TimeSpan.FromMilliseconds(timeoutMs);
 
         if (_state.Config.Ollama.TimeoutMs < MinimumRecommendedTimeoutMs)
         {
@@ -87,8 +90,11 @@ public class TranslationService : IDisposable, ITextTranslator
             _state.ActiveTranslationPair,
             preparedText);
 
+        var requestStartedAt = DateTime.UtcNow;
+
         try
         {
+            Logger.Info($"Starting translation request. Length={preparedText.Length}, Model='{model}'");
             var response = await _httpClient.PostAsJsonAsync(
                 $"{_endpoint}/api/chat",
                 requestBody,
@@ -112,6 +118,7 @@ public class TranslationService : IDisposable, ITextTranslator
             // Success - clear any error notifications
             _state.ClearErrorNotification();
             _state.OllamaAvailable = true;
+            Logger.Info($"Translation request succeeded in {GetElapsedMilliseconds(requestStartedAt)}ms");
 
             return FinalizeTranslatedText(text, result.Message.Content);
         }
@@ -135,7 +142,7 @@ public class TranslationService : IDisposable, ITextTranslator
         catch (TaskCanceledException)
         {
             // Timeout
-            HandleTimeout();
+            HandleTimeout(requestStartedAt);
             return null;
         }
         catch (Exception)
@@ -150,6 +157,7 @@ public class TranslationService : IDisposable, ITextTranslator
         // Single retry for empty response
         try
         {
+            var requestStartedAt = DateTime.UtcNow;
             var model = _state.Config.Ollama.Model;
             var preparedText = PrepareTextForTranslation(text);
 
@@ -171,6 +179,7 @@ public class TranslationService : IDisposable, ITextTranslator
                 return null;
 
             var result = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(_jsonOptions, ct);
+            Logger.Info($"Translation retry completed in {GetElapsedMilliseconds(requestStartedAt)}ms");
             return result?.Message?.Content is null
                 ? null
                 : FinalizeTranslatedText(text, result.Message.Content);
@@ -233,7 +242,7 @@ public class TranslationService : IDisposable, ITextTranslator
         }
         catch (TaskCanceledException)
         {
-            HandleTimeout();
+            HandleHealthCheckTimeout();
             return (false, "Ollama health check timed out.");
         }
         catch (Exception ex)
@@ -265,9 +274,20 @@ public class TranslationService : IDisposable, ITextTranslator
         TryNotifyError("Cannot connect to Ollama. Please ensure Ollama is running.");
     }
 
-    private void HandleTimeout()
+    private void HandleTimeout(DateTime requestStartedAt)
     {
-        TryNotifyError("Translation timed out. The model may be loading or overloaded.");
+        var elapsedMs = GetElapsedMilliseconds(requestStartedAt);
+        TryNotifyError($"Translation timed out after {elapsedMs}ms. The model may be loading or overloaded.");
+    }
+
+    private void HandleHealthCheckTimeout()
+    {
+        TryNotifyError("Ollama health check timed out.");
+    }
+
+    private static long GetElapsedMilliseconds(DateTime startedAtUtc)
+    {
+        return Math.Max(0, (long)(DateTime.UtcNow - startedAtUtc).TotalMilliseconds);
     }
 
     private void TryNotifyError(string message)

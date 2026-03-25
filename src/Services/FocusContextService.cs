@@ -14,11 +14,20 @@ public sealed class FocusContextService : IFocusContextService
     public FocusedContext GetFocusedContext()
     {
         var windowHandle = Win32.GetForegroundWindow();
+        var focusedWindowHandle = WindowInspector.GetFocusedWindowHandle(windowHandle);
         var processName = GetProcessName(windowHandle);
         var windowClassName = WindowInspector.GetClassName(windowHandle);
-        var isPasswordField = WindowInspector.IsPasswordField(windowHandle);
+        var focusedWindowClassName = WindowInspector.GetClassName(focusedWindowHandle);
+        var passwordHandle = focusedWindowHandle != IntPtr.Zero ? focusedWindowHandle : windowHandle;
+        var isPasswordField = WindowInspector.IsPasswordField(passwordHandle);
 
-        return new FocusedContext(windowHandle, processName, windowClassName, isPasswordField);
+        return new FocusedContext(
+            windowHandle,
+            focusedWindowHandle,
+            processName,
+            windowClassName,
+            focusedWindowClassName,
+            isPasswordField);
     }
 
     private static string GetProcessName(IntPtr windowHandle)

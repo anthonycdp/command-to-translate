@@ -60,7 +60,8 @@ public sealed class OnDemandTranslationCoordinator
                 return new OnDemandTranslationResult(false, "Focused field is protected and cannot be translated.");
 
             Logger.Info(
-                $"Focused context resolved: process='{context.ProcessName}', class='{context.WindowClassName}'");
+                $"Focused context resolved: process='{context.ProcessName}', class='{context.WindowClassName}', " +
+                $"focusClass='{context.FocusedWindowClassName}'");
 
             var candidateAdapters = GetCandidateAdapters(context);
             if (candidateAdapters.Count == 0)
@@ -87,7 +88,7 @@ public sealed class OnDemandTranslationCoordinator
                         triedKeystrokeBufferAdapter = true;
                     }
 
-                    captureResult = await CaptureSourceAsync(candidateAdapter, ct);
+                    captureResult = await CaptureSourceAsync(candidateAdapter, context, ct);
                     if (captureResult != null)
                     {
                         selectedAdapter = candidateAdapter;
@@ -163,7 +164,10 @@ public sealed class OnDemandTranslationCoordinator
             await Task.Delay(_hostSettleDelay, ct);
     }
 
-    private async Task<CaptureResult?> CaptureSourceAsync(ITranslationTargetAdapter adapter, CancellationToken ct)
+    private async Task<CaptureResult?> CaptureSourceAsync(
+        ITranslationTargetAdapter adapter,
+        FocusedContext context,
+        CancellationToken ct)
     {
         // Keystroke-buffer capture: read from the BufferManager instead of
         // attempting clipboard-based select+copy (which is impossible in
@@ -194,6 +198,12 @@ public sealed class OnDemandTranslationCoordinator
                 return new CaptureResult(selectedText, UsedCursorFallback: false);
         }
 
+        if (!adapter.SupportsCursorFallback(context))
+        {
+            Logger.Info($"Skipping cursor fallback for {adapter.Name} in current host");
+            return null;
+        }
+
         await adapter.SelectSourceAsync(_inputDispatcher, ct);
         await WaitForHostSettleAsync(ct);
 
@@ -217,6 +227,9 @@ public sealed class OnDemandTranslationCoordinator
     {
         var preferredAdapters = _adapters.Where(candidate => candidate.CanHandle(context)).ToList();
         var fallbackAdapters = _adapters.Where(candidate => !candidate.CanHandle(context)).ToList();
+
+        if (HostClassifier.IsChromiumHost(context))
+            return preferredAdapters;
 
         return preferredAdapters.Concat(fallbackAdapters).ToList();
     }

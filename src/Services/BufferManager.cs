@@ -21,6 +21,7 @@ public sealed class BufferManager : IDisposable
     private readonly StringBuilder _currentWord = new();
     private readonly Func<string?>? _clipboardReader;
 
+    private IntPtr _activeWindowHandle;
     private int _cursorPosition;
     private bool _disposed;
 
@@ -71,6 +72,8 @@ public sealed class BufferManager : IDisposable
         {
             if (_disposed)
                 return;
+
+            ResetStateWhenHostChanges(keyboardEvent.WindowHandle);
 
             switch (keyboardEvent.Type)
             {
@@ -293,6 +296,28 @@ public sealed class BufferManager : IDisposable
     {
         _currentPhrase.Clear();
         _currentWord.Clear();
+        _activeWindowHandle = IntPtr.Zero;
         _cursorPosition = 0;
+    }
+
+    private void ResetStateWhenHostChanges(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+            return;
+
+        if (_activeWindowHandle == IntPtr.Zero)
+        {
+            _activeWindowHandle = windowHandle;
+            return;
+        }
+
+        if (_activeWindowHandle == windowHandle)
+            return;
+
+        Logger.Info("[BufferManager] Focus changed, resetting buffered text");
+        _currentPhrase.Clear();
+        _currentWord.Clear();
+        _cursorPosition = 0;
+        _activeWindowHandle = windowHandle;
     }
 }

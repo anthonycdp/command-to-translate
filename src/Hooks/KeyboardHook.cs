@@ -141,16 +141,18 @@ public sealed class KeyboardHook : IDisposable
         bool altPressed = (Win32.GetKeyState(VK_MENU) & 0x8000) != 0;
 
         IntPtr windowHandle = Win32.GetForegroundWindow();
+        IntPtr focusedWindowHandle = WindowInspector.GetFocusedWindowHandle(windowHandle);
+        IntPtr eventWindowHandle = focusedWindowHandle != IntPtr.Zero ? focusedWindowHandle : windowHandle;
+        bool isPasswordField = WindowInspector.IsPasswordField(eventWindowHandle);
 
         // Detect Ctrl+V / Ctrl+Shift+V for paste capture.
         // Must be checked BEFORE the general Ctrl/Alt early-return.
         if (ctrlPressed && !altPressed && vk == Win32.VK_V)
         {
-            bool isPasswordField = WindowInspector.IsPasswordField(windowHandle);
             Logger.Info("[KeyboardHook] Ctrl+V detected, emitting Paste event");
             // Emit Paste event with null text — BufferManager reads clipboard
             _bufferManager.ProcessEvent(
-                new KbEvent(null, KbEventType.Paste, windowHandle, isPasswordField));
+                new KbEvent(null, KbEventType.Paste, eventWindowHandle, isPasswordField));
             return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
         }
 
@@ -166,7 +168,7 @@ public sealed class KeyboardHook : IDisposable
         if (IsIgnoredKey(vk))
             return Win32.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
-        var keyboardEvent = ConvertToKbEvent(vk, keyboardData.scanCode, windowHandle, WindowInspector.IsPasswordField(windowHandle));
+        var keyboardEvent = ConvertToKbEvent(vk, keyboardData.scanCode, eventWindowHandle, isPasswordField);
         if (keyboardEvent is not null)
         {
             _bufferManager.ProcessEvent(keyboardEvent.Value);

@@ -21,6 +21,7 @@ public interface ITranslationTargetAdapter
     /// no keyboard shortcut can create a copyable text selection.
     /// </summary>
     bool UsesKeystrokeBuffer => false;
+    bool SupportsCursorFallback(FocusedContext context) => true;
     Task SelectSourceAsync(IInputDispatcher inputDispatcher, CancellationToken ct);
     Task CopySelectionAsync(IInputDispatcher inputDispatcher, CancellationToken ct);
     Task ReplaceSelectionAsync(
@@ -41,6 +42,11 @@ public sealed class GenericTextFieldAdapter : ITranslationTargetAdapter
                !context.ProcessName.Contains("terminal", StringComparison.OrdinalIgnoreCase) &&
                !context.ProcessName.Contains("conhost", StringComparison.OrdinalIgnoreCase) &&
                !context.ProcessName.Contains("openconsole", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool SupportsCursorFallback(FocusedContext context)
+    {
+        return !HostClassifier.IsChromiumHost(context);
     }
 
     public Task SelectSourceAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
@@ -159,6 +165,12 @@ public sealed class ClassicConsoleLineAdapter : ITranslationTargetAdapter
 public sealed class ElectronTerminalAdapter : ITranslationTargetAdapter
 {
     public string Name => "ElectronTerminal";
+    private static readonly string[] KnownElectronTerminalProcesses =
+    [
+        "claude",
+        "anthropic",
+        "antigravity"
+    ];
 
     // No clipboard-based capture is possible in TUI terminals — use the
     // keystroke buffer instead.
@@ -167,7 +179,9 @@ public sealed class ElectronTerminalAdapter : ITranslationTargetAdapter
 
     public bool CanHandle(FocusedContext context)
     {
-        return string.Equals(context.WindowClassName, "Chrome_WidgetWin_1", StringComparison.OrdinalIgnoreCase);
+        return HostClassifier.IsChromiumHost(context) &&
+               KnownElectronTerminalProcesses.Any(process =>
+                   context.ProcessName.Contains(process, StringComparison.OrdinalIgnoreCase));
     }
 
     public Task SelectSourceAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
@@ -198,6 +212,14 @@ public sealed class ElectronTerminalAdapter : ITranslationTargetAdapter
         // xterm.js/Electron terminals like Antigravity, Claude Code, Codex).
         await inputDispatcher.SendRepeatedKeyAsync(Win32.VK_BACK, sourceText.Length, ct);
         await inputDispatcher.SendChordAsync([VirtualKeys.Control, VirtualKeys.Shift, VirtualKeys.V], ct);
+    }
+}
+
+internal static class HostClassifier
+{
+    public static bool IsChromiumHost(FocusedContext context)
+    {
+        return string.Equals(context.WindowClassName, "Chrome_WidgetWin_1", StringComparison.OrdinalIgnoreCase);
     }
 }
 

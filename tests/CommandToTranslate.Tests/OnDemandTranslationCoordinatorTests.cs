@@ -34,7 +34,7 @@ public class OnDemandTranslationCoordinatorTests
             clipboard,
             inputDispatcher,
             new FakeTranslator("I want to sleep"),
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "notepad", "Notepad", false)),
+            new FakeFocusContextService(CreateContext("notepad", "Notepad")),
             adapter);
 
         var result = await coordinator.ExecuteAsync(CancellationToken.None);
@@ -70,7 +70,7 @@ public class OnDemandTranslationCoordinatorTests
             clipboard,
             inputDispatcher,
             new FakeTranslator("I want to eat cheese"),
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "notepad", "Notepad", false)),
+            new FakeFocusContextService(CreateContext("notepad", "Notepad")),
             adapter);
 
         var result = await coordinator.ExecuteAsync(CancellationToken.None);
@@ -110,7 +110,7 @@ public class OnDemandTranslationCoordinatorTests
             clipboard,
             inputDispatcher,
             new FakeTranslator("let's sleep early"),
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "powershell", "PseudoConsoleWindow", false)),
+            new FakeFocusContextService(CreateContext("powershell", "PseudoConsoleWindow")),
             preferredAdapter,
             fallbackAdapter);
 
@@ -145,7 +145,7 @@ public class OnDemandTranslationCoordinatorTests
             new FakeClipboardService("keep me"),
             new FakeInputDispatcher(),
             new FakeTranslator("hello world"),
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "code", "Chrome_WidgetWin_1", false)),
+            new FakeFocusContextService(CreateContext("claude", "Chrome_WidgetWin_1", "Chrome_RenderWidgetHostHWND")),
             bufferManager,
             adapter)
             .ExecuteAsync(CancellationToken.None);
@@ -168,7 +168,7 @@ public class OnDemandTranslationCoordinatorTests
             new FakeClipboardService("keep me"),
             new FakeInputDispatcher(),
             translator,
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "notepad", "Notepad", false)),
+            new FakeFocusContextService(CreateContext("notepad", "Notepad")),
             new FakeAdapter("Generic") { CanHandleResult = true });
 
         var result = await coordinator.ExecuteAsync(CancellationToken.None);
@@ -186,7 +186,7 @@ public class OnDemandTranslationCoordinatorTests
             new FakeClipboardService("keep me"),
             new FakeInputDispatcher(),
             new FakeTranslator("unused"),
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "notepad", "Edit", true)),
+            new FakeFocusContextService(CreateContext("notepad", "Edit", isPasswordField: true)),
             new FakeAdapter("Generic") { CanHandleResult = true });
 
         var result = await coordinator.ExecuteAsync(CancellationToken.None);
@@ -203,7 +203,7 @@ public class OnDemandTranslationCoordinatorTests
             new FakeClipboardService("keep me"),
             new FakeInputDispatcher(),
             new FakeTranslator("unused"),
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "custom-app", "CustomClass", false)),
+            new FakeFocusContextService(CreateContext("custom-app", "CustomClass")),
             new FakeAdapter("Console") { CanHandleResult = false });
 
         var result = await coordinator.ExecuteAsync(CancellationToken.None);
@@ -227,7 +227,7 @@ public class OnDemandTranslationCoordinatorTests
             clipboard,
             new FakeInputDispatcher(),
             translator,
-            new FakeFocusContextService(new FocusedContext((IntPtr)42, "notepad", "Notepad", false)),
+            new FakeFocusContextService(CreateContext("notepad", "Notepad")),
             adapter);
 
         var result = await coordinator.ExecuteAsync(CancellationToken.None);
@@ -254,6 +254,61 @@ public class OnDemandTranslationCoordinatorTests
         Assert.True(handled);
         Assert.Equal(1, eventCount);
         Assert.False(state.IsPaused);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotUseCursorFallback_InChromiumGenericHosts()
+    {
+        var clipboard = new FakeClipboardService("keep me");
+        var adapter = new FakeAdapter("Generic")
+        {
+            CanHandleResult = true,
+            SupportsCursorFallbackResult = false
+        };
+        var coordinator = CreateCoordinator(
+            CreateState(),
+            clipboard,
+            new FakeInputDispatcher(),
+            new FakeTranslator("unused"),
+            new FakeFocusContextService(CreateContext("chrome", "Chrome_WidgetWin_1", "Chrome_RenderWidgetHostHWND")),
+            adapter);
+
+        var result = await coordinator.ExecuteAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("No text could be captured", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, adapter.CopySelectionCalls);
+        Assert.Equal(0, adapter.SelectSourceCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotFallbackToTerminalAdapters_InChromiumGenericHosts()
+    {
+        var clipboard = new FakeClipboardService("keep me");
+        var genericAdapter = new FakeAdapter("Generic")
+        {
+            CanHandleResult = true,
+            SupportsCursorFallbackResult = false
+        };
+        var terminalAdapter = new FakeAdapter("ElectronTerminal")
+        {
+            CanHandleResult = false,
+            UsesKeystrokeBuffer = true
+        };
+
+        var result = await CreateCoordinator(
+            CreateState(),
+            clipboard,
+            new FakeInputDispatcher(),
+            new FakeTranslator("unused"),
+            new FakeFocusContextService(CreateContext("Code", "Chrome_WidgetWin_1", "Chrome_WidgetWin_1")),
+            genericAdapter,
+            terminalAdapter)
+            .ExecuteAsync(CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(1, genericAdapter.CopySelectionCalls);
+        Assert.Equal(0, terminalAdapter.CopySelectionCalls);
     }
 
     private static OnDemandTranslationCoordinator CreateCoordinator(
@@ -307,6 +362,21 @@ public class OnDemandTranslationCoordinatorTests
                 }
             }
         };
+    }
+
+    private static FocusedContext CreateContext(
+        string processName,
+        string windowClassName,
+        string focusedWindowClassName = "",
+        bool isPasswordField = false)
+    {
+        return new FocusedContext(
+            (IntPtr)42,
+            (IntPtr)43,
+            processName,
+            windowClassName,
+            focusedWindowClassName,
+            isPasswordField);
     }
 
     private sealed class FakeTranslator : ITextTranslator
@@ -425,6 +495,7 @@ public class OnDemandTranslationCoordinatorTests
         public bool CanHandleResult { get; set; }
         public bool SkipPreSelectionCopy { get; set; }
         public bool UsesKeystrokeBuffer { get; set; }
+        public bool SupportsCursorFallbackResult { get; set; } = true;
         public int SelectSourceCalls { get; private set; }
         public int CopySelectionCalls { get; private set; }
         public int ReplaceSelectionCalls { get; private set; }
@@ -433,6 +504,7 @@ public class OnDemandTranslationCoordinatorTests
         public Func<Task>? OnReplaceSelectionAsync { get; set; }
 
         public bool CanHandle(FocusedContext context) => CanHandleResult;
+        public bool SupportsCursorFallback(FocusedContext context) => SupportsCursorFallbackResult;
 
         public Task SelectSourceAsync(IInputDispatcher inputDispatcher, CancellationToken ct)
         {

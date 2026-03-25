@@ -263,6 +263,17 @@ public class BufferManagerTests
         Assert.Equal("existing", buffer.CurrentPhrase);
     }
 
+    [Fact]
+    public void ProcessEvent_ResetsBufferWhenWindowHandleChanges()
+    {
+        using var buffer = new BufferManager();
+
+        Type(buffer, "hello", (IntPtr)1);
+        Type(buffer, "world", (IntPtr)2);
+
+        Assert.Equal("world", buffer.CurrentPhrase);
+    }
+
     private static void Type(BufferManager buffer, string text, IntPtr? windowHandle = null)
     {
         foreach (var character in text)
